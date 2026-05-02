@@ -1,0 +1,38 @@
+name: Flutter Build APK
+
+# سيتم تشغيل البناء تلقائياً عند إرسال الكود (push) لفرع main
+on:
+  push:
+    branches:
+        - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # سيستخدم خادم لينكس من جيت هاب
+
+    steps:
+      - uses: actions/checkout@v3 # تحميل الكود من حسابك
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17' # استخدام نسخة جافا حديثة لتجنب الأخطاء السابقة
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0' # أو اكتب الإصدار الذي تستخدمه
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
