@@ -1,4 +1,4 @@
-name: Flutter Build Optimized APK
+name: Flutter Build Single Optimized APK
 
 on:
   push:
@@ -26,18 +26,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # الخطوة السحرية لتصغير الحجم: تنظيف أي مخلفات سابقة وبناء نسخة مجزأة
-      - name: Build Optimized APK
+      - name: Build Single Optimized APK
         run: |
           flutter clean
           flutter pub get
-          # بناء APK مقسم حسب نوع المعالج (Split per ABI) لتصغير الحجم
-          # واستخدام --obfuscate لتشفير الكود وتقليل حجمه
-          flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols --no-tree-shake-icons
+          # بناء ملف واحد شامل (Universal) مع أقصى درجات الضغط والتشفير
+          flutter build apk --release --obfuscate --split-debug-info=build/app/outputs/symbols --no-tree-shake-icons
 
-      - name: Upload APKs
+      - name: Upload Single APK
         uses: actions/upload-artifact@v4
         with:
-          name: optimized-apks
-          # هنا سيقوم برفع النسخ الثلاث (v7, v8, x86) لتختار ما يناسبك
-          path: build/app/outputs/flutter-apk/*.apk
+          name: realestate-final-app
+          path: build/app/outputs/flutter-apk/app-release.apk
