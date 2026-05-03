@@ -137,17 +137,52 @@ class DatabaseHelper {
     Database? tempDb;
     try {
       tempDb = await openReadOnlyDatabase(path);
-      // التحقق من وجود جدول properties
+      // 1. التحقق من وجود جدول properties
       final tables = await tempDb.rawQuery(
           "SELECT name FROM sqlite_master WHERE type='table' AND name='properties'");
       if (tables.isEmpty) return false;
 
-      // التحقق من وجود بعض الأعمدة الأساسية للتأكد من أنها قاعدة بيانات هذا التطبيق تحديداً
+      // 2. التحقق من تطابق هيكل الأعمدة تماماً لضمان عدم حدوث أخطاء أثناء القراءة
       final columns = await tempDb.rawQuery('PRAGMA table_info(properties)');
-      final columnNames = columns.map((c) => c['name'] as String).toList();
+      final columnNames = columns.map((c) => c['name'] as String).toSet();
 
-      final requiredColumns = ['id', 'entry_type', 'adType', 'ownerName'];
-      for (var col in requiredColumns) {
+      final expectedColumns = {
+        'id',
+        'entry_type',
+        'adType',
+        'deedType',
+        'propertyType',
+        'province',
+        'region',
+        'addressDetails',
+        'floor',
+        'rooms',
+        'area',
+        'hasGarden',
+        'isDuplex',
+        'facade',
+        'directions',
+        'finishingLevel',
+        'features',
+        'ownershipType',
+        'ownershipDetails',
+        'sharesCount',
+        'price',
+        'currency',
+        'status',
+        'ownerName',
+        'ownerWhatsapp',
+        'officeName',
+        'contactPhone',
+        'facebookLink',
+        'notes',
+        'images',
+        'videos',
+        'ownerStatus'
+      };
+
+      // يجب أن تحتوي قاعدة البيانات على جميع الأعمدة المتوقعة على الأقل
+      for (var col in expectedColumns) {
         if (!columnNames.contains(col)) return false;
       }
 

@@ -5,7 +5,6 @@ import '../providers/settings_provider.dart';
 import '../../../core/utils/encryption_helper.dart';
 import '../../../core/database/database_helper.dart';
 import 'dart:io';
-import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../properties/providers/property_provider.dart';
 import '../../../core/widgets/app_form_widgets.dart';
@@ -123,34 +122,42 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
         throw Exception('ملف قاعدة البيانات غير موجود');
       }
 
-      // Desktop: use file picker save dialog
-      if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
-        final ts = DateTime.now()
-            .toLocal()
-            .toString()
-            .replaceAll(':', '-')
-            .substring(0, 19);
-        final savePath = await FilePicker.platform.saveFile(
+      final ts = DateTime.now()
+          .toLocal()
+          .toString()
+          .replaceAll(':', '-')
+          .substring(0, 19);
+      final fileName = 'realestate_backup_$ts.db';
+
+      // استخدام FilePicker لاختيار مكان الحفظ مباشرة (يعمل على جميع المنصات)
+      String? savePath;
+      if (Platform.isAndroid || Platform.isIOS) {
+        // على الموبايل نستخدم getDirectoryPath ثم ندمج اسم الملف
+        final directoryPath = await FilePicker.platform.getDirectoryPath(
+          dialogTitle: 'اختر مجلد حفظ النسخة الاحتياطية',
+        );
+        if (directoryPath != null) {
+          savePath = '$directoryPath/$fileName';
+        }
+      } else {
+        // على الديسك توب نستخدم saveFile مباشرة
+        savePath = await FilePicker.platform.saveFile(
           dialogTitle: 'حفظ النسخة الاحتياطية',
-          fileName: 'realestate_backup_$ts.db',
+          fileName: fileName,
         );
-        if (savePath == null) return;
-        await sourceFile.copy(savePath);
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✓ تم الحفظ:\n$savePath'),
-            backgroundColor: AppTheme.accentGreen,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-        return;
       }
 
-      // Mobile: share sheet
-      await Share.shareXFiles(
-        [XFile(dbPath)],
-        text: 'نسخة احتياطية — ${DateTime.now().toLocal()}',
+      if (savePath == null) return;
+
+      await sourceFile.copy(savePath);
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✓ تم حفظ النسخة الاحتياطية بنجاح في:\n$savePath'),
+          backgroundColor: AppTheme.accentGreen,
+          duration: const Duration(seconds: 5),
+        ),
       );
     } catch (e) {
       if (!context.mounted) return;

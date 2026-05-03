@@ -32,11 +32,7 @@ dev_dependencies:
   flutter_lints: ^2.0.0
   flutter_launcher_icons: ^0.14.4
 
-flutter_launcher_icons:
-  android: "ic_launcher"
-  ios: true
-  image_path: "assets/icon/app_icon.png"
-  min_sdk_android: 21
+# تم توليد الأيقونات يدوياً لضمان التوافق مع جميع الأجهزة ولتجنب مشاكل التوافق في pub.dev
 
 flutter:
   uses-material-design: true
