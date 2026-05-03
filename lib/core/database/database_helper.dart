@@ -131,4 +131,31 @@ class DatabaseHelper {
       _database = null;
     }
   }
+
+  /// يتحقق مما إذا كان الملف المختار هو قاعدة بيانات صالحة للمشروع.
+  Future<bool> isValidDatabase(String path) async {
+    Database? tempDb;
+    try {
+      tempDb = await openReadOnlyDatabase(path);
+      // التحقق من وجود جدول properties
+      final tables = await tempDb.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='properties'");
+      if (tables.isEmpty) return false;
+
+      // التحقق من وجود بعض الأعمدة الأساسية للتأكد من أنها قاعدة بيانات هذا التطبيق تحديداً
+      final columns = await tempDb.rawQuery('PRAGMA table_info(properties)');
+      final columnNames = columns.map((c) => c['name'] as String).toList();
+
+      final requiredColumns = ['id', 'entry_type', 'adType', 'ownerName'];
+      for (var col in requiredColumns) {
+        if (!columnNames.contains(col)) return false;
+      }
+
+      return true;
+    } catch (e) {
+      return false;
+    } finally {
+      await tempDb?.close();
+    }
+  }
 }

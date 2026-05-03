@@ -165,13 +165,30 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   // ── Import ─────────────────────────────────────────────────────────────────
   Future<void> _importDatabase(BuildContext context) async {
-    final result = await FilePicker.platform
-        .pickFiles(type: FileType.any, allowMultiple: false);
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['db', 'sqlite'],
+      allowMultiple: false,
+    );
     if (result == null || result.files.single.path == null) return;
     if (!context.mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
+    final selectedPath = result.files.single.path!;
 
+    // التحقق من صحة الملف قبل بدء عملية الاستبدال
+    final isValid = await DatabaseHelper.instance.isValidDatabase(selectedPath);
+    if (!isValid) {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('الملف المختار ليس قاعدة بيانات صالحة لهذا التطبيق'),
+          backgroundColor: AppTheme.accentRed,
+        ),
+      );
+      return;
+    }
+    if (!context.mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -196,9 +213,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     );
 
     try {
-      final selectedPath = result.files.single.path!;
       await DatabaseHelper.instance.closeDatabase();
-      await Future.delayed(const Duration(milliseconds: 500));
       final dbPath = await DatabaseHelper.instance.getDatabasePath();
       await File(selectedPath).copy(dbPath);
       await ref.read(propertyProvider.notifier).loadProperties();
