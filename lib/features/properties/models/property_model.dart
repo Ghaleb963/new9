@@ -38,6 +38,8 @@ class PropertyModel {
   final List<String> images;
   final List<String> videos;
   final String ownerStatus;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   PropertyModel({
     this.id,
@@ -72,6 +74,8 @@ class PropertyModel {
     required this.images,
     required this.videos,
     required this.ownerStatus,
+    this.createdAt,
+    this.updatedAt,
   });
 
   PropertyModel copyWith({
@@ -107,6 +111,8 @@ class PropertyModel {
     List<String>? images,
     List<String>? videos,
     String? ownerStatus,
+    DateTime? createdAt,
+    DateTime? updatedAt,
   }) {
     return PropertyModel(
       id: id ?? this.id,
@@ -141,6 +147,8 @@ class PropertyModel {
       images: images ?? this.images,
       videos: videos ?? this.videos,
       ownerStatus: ownerStatus ?? this.ownerStatus,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -179,6 +187,8 @@ class PropertyModel {
       'images': jsonEncode(images),
       'videos': jsonEncode(videos),
       'ownerStatus': ownerStatus,
+      'created_at': createdAt?.toIso8601String(),
+      'updated_at': updatedAt?.toIso8601String(),
     };
   }
 
@@ -217,6 +227,12 @@ class PropertyModel {
       images: _decodeStringList(map['images']),
       videos: _decodeStringList(map['videos']),
       ownerStatus: (map['ownerStatus'] as String?) ?? '',
+      createdAt: map['created_at'] != null
+          ? DateTime.tryParse(map['created_at'] as String)
+          : null,
+      updatedAt: map['updated_at'] != null
+          ? DateTime.tryParse(map['updated_at'] as String)
+          : null,
     );
   }
 

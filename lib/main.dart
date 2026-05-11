@@ -61,8 +61,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // مراقبة عدد التوافقات للـ badge — يتحدث تلقائياً مع allMatchesProvider
-    final matchCount = ref.watch(allMatchesProvider).length;
+    final matchCount =
+        ref.watch(allMatchesProvider.select((m) => m.length));
 
     return Scaffold(
       body: IndexedStack(

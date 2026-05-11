@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../features/properties/services/matching_service.dart';
+import '../utils/score_helpers.dart';
+import 'app_criteria_tag.dart';
 
 // ════════════════════════════════════════════════════════
 // showMatchNotification — الدالة العامة لإظهار تنبيه المطابقة
@@ -223,7 +225,7 @@ class _MatchToastWidgetState extends State<_MatchToastWidget>
                               value: best.score,
                               backgroundColor:
                                   Colors.grey.withValues(alpha: 0.3),
-                              color: _scoreColor(best.score),
+                              color: ScoreHelpers.notificationScoreColor(best.score),
                               minHeight: 5,
                             ),
                           ),
@@ -233,7 +235,7 @@ class _MatchToastWidgetState extends State<_MatchToastWidget>
                           best.scoreLabel,
                           style: TextStyle(
                               fontSize: 11,
-                              color: _scoreColor(best.score),
+                              color: ScoreHelpers.notificationScoreColor(best.score),
                               fontWeight: FontWeight.w600),
                         ),
                       ],
@@ -249,7 +251,7 @@ class _MatchToastWidgetState extends State<_MatchToastWidget>
                       spacing: 6,
                       runSpacing: 4,
                       children: best.matchedCriteria
-                          .map((c) => _CriteriaTag(label: c))
+                           .map((c) => AppCriteriaTag(label: c))
                           .toList(),
                     ),
                   ),
@@ -307,11 +309,6 @@ class _MatchToastWidgetState extends State<_MatchToastWidget>
     );
   }
 
-  Color _scoreColor(double score) {
-    if (score >= 0.85) return Colors.green;
-    if (score >= 0.70) return Colors.lightGreen;
-    return Colors.orange;
-  }
 }
 
 class _InfoChip extends StatelessWidget {
@@ -340,28 +337,4 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-class _CriteriaTag extends StatelessWidget {
-  final String label;
-  const _CriteriaTag({required this.label});
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.green.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.check, size: 10, color: Colors.green),
-          const SizedBox(width: 3),
-          Text(label,
-              style: const TextStyle(fontSize: 10, color: Colors.green)),
-        ],
-      ),
-    );
-  }
-}

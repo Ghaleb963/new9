@@ -3,12 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_provider.dart';
 import '../../../core/utils/encryption_helper.dart';
-import '../../../core/database/database_helper.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import '../../properties/providers/property_provider.dart';
 import '../../../core/widgets/app_form_widgets.dart';
+import '../../../core/widgets/app_loading_dialog.dart';
 import '../../../core/theme/app_theme.dart';
+import '../services/backup_service.dart';
+import '../../../core/utils/permission_helper.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
   const SettingsView({super.key});
@@ -115,11 +117,18 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   // ── Export ─────────────────────────────────────────────────────────────────
   Future<void> _exportDatabase(BuildContext context) async {
     try {
-      final dbPath = await DatabaseHelper.instance.getDatabasePath();
-      final sourceFile = File(dbPath);
-
-      if (!await sourceFile.exists()) {
-        throw Exception('ملف قاعدة البيانات غير موجود');
+      if (Platform.isAndroid) {
+        final granted = await requestStoragePermission();
+        if (!granted) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('صلاحية التخزين مطلوبة لتصدير النسخة الاحتياطية'),
+              backgroundColor: AppTheme.accentRed,
+            ),
+          );
+          return;
+        }
       }
 
       final ts = DateTime.now()
@@ -129,10 +138,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           .substring(0, 19);
       final fileName = 'realestate_backup_$ts.db';
 
-      // استخدام FilePicker لاختيار مكان الحفظ مباشرة (يعمل على جميع المنصات)
       String? savePath;
       if (Platform.isAndroid || Platform.isIOS) {
-        // على الموبايل نستخدم getDirectoryPath ثم ندمج اسم الملف
         final directoryPath = await FilePicker.platform.getDirectoryPath(
           dialogTitle: 'اختر مجلد حفظ النسخة الاحتياطية',
         );
@@ -140,7 +147,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           savePath = '$directoryPath/$fileName';
         }
       } else {
-        // على الديسك توب نستخدم saveFile مباشرة
         savePath = await FilePicker.platform.saveFile(
           dialogTitle: 'حفظ النسخة الاحتياطية',
           fileName: fileName,
@@ -149,7 +155,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
       if (savePath == null) return;
 
-      await sourceFile.copy(savePath);
+      await BackupService.exportTo(savePath);
 
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -172,6 +178,20 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   // ── Import ─────────────────────────────────────────────────────────────────
   Future<void> _importDatabase(BuildContext context) async {
+    if (Platform.isAndroid) {
+      final granted = await requestStoragePermission();
+      if (!granted) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('صلاحية التخزين مطلوبة لاستيراد النسخة الاحتياطية'),
+            backgroundColor: AppTheme.accentRed,
+          ),
+        );
+        return;
+      }
+    }
+
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['db', 'sqlite'],
@@ -183,8 +203,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     final messenger = ScaffoldMessenger.of(context);
     final selectedPath = result.files.single.path!;
 
-    // التحقق من صحة الملف قبل بدء عملية الاستبدال
-    final isValid = await DatabaseHelper.instance.isValidDatabase(selectedPath);
+    final isValid = await BackupService.isValidBackup(selectedPath);
     if (!isValid) {
       if (!context.mounted) return;
       messenger.showSnackBar(
@@ -196,33 +215,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       return;
     }
     if (!context.mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => Center(
-        child: Container(
-          padding: const EdgeInsets.all(AppTheme.sp24),
-          decoration: BoxDecoration(
-            color: AppTheme.bgRaised,
-            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-          ),
-          child: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: AppTheme.accentGreen),
-              SizedBox(height: AppTheme.sp16),
-              Text('جاري الاستيراد...',
-                  style: TextStyle(color: AppTheme.textMedium)),
-            ],
-          ),
-        ),
-      ),
-    );
+    showAppLoadingDialog(context, message: 'جاري الاستيراد...');
 
     try {
-      await DatabaseHelper.instance.closeDatabase();
-      final dbPath = await DatabaseHelper.instance.getDatabasePath();
-      await File(selectedPath).copy(dbPath);
+      await BackupService.restoreFrom(selectedPath);
       await ref.read(propertyProvider.notifier).loadProperties();
 
       if (!context.mounted) return;

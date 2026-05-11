@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-// ════════════════════════════════════════════════════════
-// Detail & Filter Widgets — مُعاد تصميمها
-// ════════════════════════════════════════════════════════
-
-// ── صف تفاصيل العقار مع أيقونة ──────────────────────────────────────────────
 class AppDetailRow extends StatelessWidget {
   final String label;
   final String value;
@@ -32,12 +27,11 @@ class AppDetailRow extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppTheme.bgRaised,
           borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-          border: Border.all(color: AppTheme.borderSubtle, width: 1),
+          border: Border.all(color: AppTheme.borderSubtle, width: 0.5),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Label side
             SizedBox(
               width: 110,
               child: Row(
@@ -52,21 +46,20 @@ class AppDetailRow extends StatelessWidget {
                       style: const TextStyle(
                         color: AppTheme.textLow,
                         fontSize: AppTheme.fontSm,
-                        fontWeight: FontWeight.w500,
+                        fontWeight: AppTheme.w500,
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-            // Value side
             Expanded(
               child: Text(
                 value,
                 style: TextStyle(
                   color: valueColor ?? AppTheme.textHigh,
                   fontSize: AppTheme.fontMd,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: AppTheme.w500,
                 ),
               ),
             ),
@@ -77,7 +70,6 @@ class AppDetailRow extends StatelessWidget {
   }
 }
 
-// ── قسم في نموذج الفلترة ─────────────────────────────────────────────────────
 class AppFilterSection extends StatelessWidget {
   final String title;
   final List<Widget> children;
@@ -103,21 +95,20 @@ class AppFilterSection extends StatelessWidget {
             child: Row(
               children: [
                 Container(
-                  width: 3,
+                  width: 2.5,
                   height: 14,
                   decoration: BoxDecoration(
                     color: AppTheme.accentGreen,
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(1),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: AppTheme.sp8),
                 Text(
                   title,
                   style: const TextStyle(
                     fontSize: AppTheme.fontSm,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppTheme.w600,
                     color: AppTheme.textHigh,
-                    letterSpacing: 0.3,
                   ),
                 ),
               ],
@@ -130,7 +121,6 @@ class AppFilterSection extends StatelessWidget {
   }
 }
 
-// ── Choice Chips للفلترة المتقدمة ───────────────────────────────────────────
 class AppChoiceChips extends StatelessWidget {
   final List<String> items;
   final String? selected;
@@ -160,24 +150,22 @@ class AppChoiceChips extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color: isSelected
-                  ? AppTheme.accentGreen.withValues(alpha: 0.15)
+                  ? AppTheme.accentGreen.withValues(alpha: 0.12)
                   : AppTheme.bgRaised,
               borderRadius: BorderRadius.circular(AppTheme.radiusFull),
               border: Border.all(
                 color: isSelected
-                    ? AppTheme.accentGreen.withValues(alpha: 0.6)
+                    ? AppTheme.accentGreen.withValues(alpha: 0.4)
                     : AppTheme.borderMedium,
-                width: isSelected ? 1.5 : 1,
+                width: isSelected ? 1.5 : 0.5,
               ),
             ),
             child: Text(
               t,
               style: TextStyle(
-                color:
-                    isSelected ? AppTheme.accentGreen : AppTheme.textMedium,
+                color: isSelected ? AppTheme.accentGreen : AppTheme.textMedium,
                 fontSize: AppTheme.fontSm,
-                fontWeight:
-                    isSelected ? FontWeight.w700 : FontWeight.w400,
+                fontWeight: isSelected ? AppTheme.w600 : AppTheme.w400,
               ),
             ),
           ),
@@ -187,7 +175,6 @@ class AppChoiceChips extends StatelessWidget {
   }
 }
 
-// ── Range Filter (من - إلى) ──────────────────────────────────────────────────
 class AppRangeFilter extends StatelessWidget {
   final String fromHint;
   final String toHint;

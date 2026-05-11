@@ -1,12 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-// ════════════════════════════════════════════════════════
-// Form Widgets — مكوّنات النماذج المُعاد تصميمها
-// شبكة 8pt صارمة + تسلسل بصري واضح
-// ════════════════════════════════════════════════════════
-
-// ── قسم في النموذج مع خط جانبي ملوّن ──────────────────────────────────────
 class AppFormSection extends StatelessWidget {
   final String title;
   final List<Widget> children;
@@ -26,39 +20,35 @@ class AppFormSection extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: AppTheme.sp16),
       decoration: BoxDecoration(
         color: AppTheme.bgSurface,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.borderSubtle, width: 1),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: AppTheme.borderSubtle, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Section header
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppTheme.sp16,
-              vertical: AppTheme.sp12,
+            padding: const EdgeInsets.fromLTRB(
+              AppTheme.sp16,
+              AppTheme.sp12,
+              AppTheme.sp16,
+              AppTheme.sp10,
             ),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.07),
-              borderRadius: const BorderRadius.only(
-                topRight: Radius.circular(AppTheme.radiusLg),
-                topLeft: Radius.circular(AppTheme.radiusLg),
-              ),
               border: Border(
                 bottom: BorderSide(
-                  color: color.withValues(alpha: 0.2),
-                  width: 1,
+                  color: color.withValues(alpha: 0.15),
+                  width: 0.5,
                 ),
               ),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 3,
-                  height: 16,
+                  width: 2.5,
+                  height: 14,
                   decoration: BoxDecoration(
                     color: color,
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(1),
                   ),
                 ),
                 const SizedBox(width: AppTheme.sp8),
@@ -66,15 +56,14 @@ class AppFormSection extends StatelessWidget {
                   title,
                   style: TextStyle(
                     fontSize: AppTheme.fontSm,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: AppTheme.w600,
                     color: color,
-                    letterSpacing: 0.4,
+                    letterSpacing: 0,
                   ),
                 ),
               ],
             ),
           ),
-          // Section content
           Padding(
             padding: const EdgeInsets.all(AppTheme.sp16),
             child: Column(
@@ -88,7 +77,6 @@ class AppFormSection extends StatelessWidget {
   }
 }
 
-// ── حقل نص مُحسَّن ──────────────────────────────────────────────────────────
 class AppTextField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
@@ -137,7 +125,6 @@ class AppTextField extends StatelessWidget {
   }
 }
 
-// ── Dropdown مُحسَّن ─────────────────────────────────────────────────────────
 class AppDropdown extends StatelessWidget {
   final String label;
   final List<String> items;
@@ -194,7 +181,6 @@ class AppDropdown extends StatelessWidget {
   }
 }
 
-// ── Smart Buttons (اختيار واحد) ──────────────────────────────────────────────
 class AppSmartButtons extends StatelessWidget {
   final String label;
   final List<String> items;
@@ -227,8 +213,7 @@ class AppSmartButtons extends StatelessWidget {
                 style: const TextStyle(
                   color: AppTheme.textMedium,
                   fontSize: AppTheme.fontXs,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.3,
+                  fontWeight: AppTheme.w500,
                 ),
               ),
             ),
@@ -246,23 +231,23 @@ class AppSmartButtons extends StatelessWidget {
                     vertical: AppTheme.sp8,
                   ),
                   decoration: BoxDecoration(
-                    color: isSelected ? color : AppTheme.bgRaised,
+                    color: isSelected
+                        ? color.withValues(alpha: 0.15)
+                        : AppTheme.bgRaised,
                     borderRadius: BorderRadius.circular(AppTheme.radiusFull),
                     border: Border.all(
-                      color: isSelected ? color : AppTheme.borderMedium,
-                      width: 1.5,
+                      color: isSelected
+                          ? color.withValues(alpha: 0.4)
+                          : AppTheme.borderMedium,
+                      width: isSelected ? 1.5 : 0.5,
                     ),
-                    boxShadow: isSelected ? AppTheme.shadowGreen : null,
                   ),
                   child: Text(
                     item,
                     style: TextStyle(
-                      color: isSelected
-                          ? AppTheme.textOnAccent
-                          : AppTheme.textMedium,
+                      color: isSelected ? color : AppTheme.textMedium,
                       fontSize: AppTheme.fontSm,
-                      fontWeight:
-                          isSelected ? FontWeight.w700 : FontWeight.w400,
+                      fontWeight: isSelected ? AppTheme.w600 : AppTheme.w400,
                     ),
                   ),
                 ),
@@ -275,7 +260,6 @@ class AppSmartButtons extends StatelessWidget {
   }
 }
 
-// ── Multi-Select (اختيار متعدد) ──────────────────────────────────────────────
 class AppMultiSelect extends StatelessWidget {
   final List<String> items;
   final List<String> selectedItems;
@@ -308,14 +292,14 @@ class AppMultiSelect extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color: isSelected
-                  ? color.withValues(alpha: 0.15)
+                  ? color.withValues(alpha: 0.12)
                   : AppTheme.bgRaised,
               borderRadius: BorderRadius.circular(AppTheme.radiusFull),
               border: Border.all(
                 color: isSelected
-                    ? color.withValues(alpha: 0.6)
+                    ? color.withValues(alpha: 0.4)
                     : AppTheme.borderMedium,
-                width: isSelected ? 1.5 : 1,
+                width: isSelected ? 1.5 : 0.5,
               ),
             ),
             child: Row(
@@ -330,7 +314,7 @@ class AppMultiSelect extends StatelessWidget {
                   style: TextStyle(
                     color: isSelected ? color : AppTheme.textMedium,
                     fontSize: AppTheme.fontSm,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                    fontWeight: isSelected ? AppTheme.w600 : AppTheme.w400,
                   ),
                 ),
               ],
@@ -342,7 +326,6 @@ class AppMultiSelect extends StatelessWidget {
   }
 }
 
-// ── Section Title (في صفحة الإعدادات) ────────────────────────────────────────
 class AppSectionTitle extends StatelessWidget {
   final String title;
   final IconData? icon;
@@ -367,9 +350,8 @@ class AppSectionTitle extends StatelessWidget {
             title,
             style: const TextStyle(
               fontSize: AppTheme.fontLg,
-              fontWeight: FontWeight.w700,
+              fontWeight: AppTheme.w700,
               color: AppTheme.accentGreen,
-              letterSpacing: 0.3,
             ),
           ),
         ],

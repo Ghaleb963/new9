@@ -52,6 +52,11 @@ class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
     await DatabaseHelper.instance.updateProperty(updated);
     state = state.map((p) => p.id == id ? updated : p).toList();
   }
+
+  List<MatchResult>? findMatchesFor(PropertyModel property) {
+    final matches = MatchingService.findMatches(property, state);
+    return matches.isEmpty ? null : matches;
+  }
 }
 
 final propertyProvider =
@@ -291,4 +296,31 @@ final propertyFilterProvider =
 final allMatchesProvider = Provider<List<MatchResult>>((ref) {
   final allProperties = ref.watch(propertyProvider);
   return MatchingService.findAllMatches(allProperties);
+});
+
+class PropertyStats {
+  final int total;
+  final int offers;
+  final int requirements;
+  final int available;
+  final int sold;
+
+  const PropertyStats({
+    required this.total,
+    required this.offers,
+    required this.requirements,
+    required this.available,
+    required this.sold,
+  });
+}
+
+final propertyStatsProvider = Provider<PropertyStats>((ref) {
+  final all = ref.watch(propertyProvider);
+  return PropertyStats(
+    total: all.length,
+    offers: all.where((p) => p.entryType == EntryType.offer).length,
+    requirements: all.where((p) => p.entryType == EntryType.requirement).length,
+    available: all.where((p) => p.status == 'متاح').length,
+    sold: all.where((p) => p.status == 'مباع').length,
+  );
 });

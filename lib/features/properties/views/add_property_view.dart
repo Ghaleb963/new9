@@ -6,12 +6,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/property_model.dart';
 import '../providers/property_provider.dart';
-import '../services/matching_service.dart';
 import 'match_results_view.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_form_widgets.dart';
 import '../../../core/widgets/app_image_widgets.dart';
 import '../../../core/widgets/match_notification_overlay.dart';
+import '../widgets/add_property_widgets.dart';
 
 class AddPropertyView extends ConsumerStatefulWidget {
   final PropertyModel? existingProperty;
@@ -256,12 +257,9 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
               .showSnackBar(const SnackBar(content: Text('تمت الإضافة بنجاح')));
 
           // ── نظام المطابقة الفورية ──────────────────────────────
-          // نقرأ القائمة المحدَّثة من الـ Provider (تشمل السجل الجديد)
-          // ثم نبحث عن توافقات من النوع المعاكس
-          final allProperties = ref.read(propertyProvider);
-          final matches = MatchingService.findMatches(property, allProperties);
+          final matches = ref.read(propertyProvider.notifier).findMatchesFor(property);
 
-          if (matches.isNotEmpty && mounted) {
+          if (matches != null && matches.isNotEmpty && mounted) {
             // نحفظ السياق ومرجع العقار قبل _resetForm() كي لا تُعاد
             // بناء الـ Widget وتُلغى المتغيرات المؤقتة
             final ctx = context;
@@ -306,13 +304,13 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppTheme.sp16),
           children: [
             // ══════════════════════════════════════════════════
             // [جديد] Selector نوع الإدخال — أول شيء يراه المستخدم
             // التصميم: بطاقتان كبيرتان Minimalist مع أيقونة ووصف واضح
             // ══════════════════════════════════════════════════
-            _EntryTypeSelector(
+            EntryTypeSelector(
               selected: entryType,
               onChanged: (type) => setState(() {
                 entryType = type;
@@ -322,7 +320,7 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
                 deedType = 'سكني';
               }),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppTheme.sp8),
 
             // ══════════════════════════════════════════════════
             // حقول مشتركة بين العرض والطلب
@@ -549,22 +547,22 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
                   ),
               ]),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: AppTheme.sp20),
             ElevatedButton(
               onPressed: _isSaving ? null : _submitProperty,
               child: Padding(
-                padding: const EdgeInsets.all(12.0),
+                padding: const EdgeInsets.all(AppTheme.sp12),
                 child: _isSaving
                     ? const SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2, color: AppTheme.textOnAccent))
                     : Text(isEditing ? 'حفظ التعديلات' : 'إضافة السجل',
-                        style: const TextStyle(fontSize: 18)),
+                        style: const TextStyle(fontSize: AppTheme.fontLg)),
               ),
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: AppTheme.sp40),
           ],
         ),
       ),
@@ -576,103 +574,4 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
 // Widget مستقل لـ Selector نوع الإدخال.
 // فصله في Widget خاص يحترم مبدأ Single Responsibility
 // ويجعله قابلاً لإعادة الاستخدام أو التعديل دون المساس بالـ Form.
-// ══════════════════════════════════════════════════
-class _EntryTypeSelector extends StatelessWidget {
-  final EntryType selected;
-  final ValueChanged<EntryType> onChanged;
 
-  const _EntryTypeSelector({
-    required this.selected,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _TypeCard(
-            entryType: EntryType.offer,
-            icon: Icons.home_work_outlined,
-            label: 'عرض عقار',
-            description: 'بيع أو تأجير عقار',
-            color: Colors.green,
-            isSelected: selected == EntryType.offer,
-            onTap: () => onChanged(EntryType.offer),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _TypeCard(
-            entryType: EntryType.requirement,
-            icon: Icons.search_rounded,
-            label: 'طلب عقار',
-            description: 'باحث عن عقار بمواصفات',
-            color: Colors.orange,
-            isSelected: selected == EntryType.requirement,
-            onTap: () => onChanged(EntryType.requirement),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TypeCard extends StatelessWidget {
-  final EntryType entryType;
-  final IconData icon;
-  final String label;
-  final String description;
-  final Color color;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _TypeCard({
-    required this.entryType,
-    required this.icon,
-    required this.label,
-    required this.description,
-    required this.color,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-        decoration: BoxDecoration(
-          color: isSelected ? color.withValues(alpha: 0.15) : Colors.grey[850],
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected ? color : Colors.grey[700]!,
-            width: isSelected ? 2 : 1,
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: 32, color: isSelected ? color : Colors.grey),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-                color: isSelected ? color : Colors.grey[300],
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              description,
-              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
