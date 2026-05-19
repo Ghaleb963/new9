@@ -3,7 +3,6 @@ import '../models/property_model.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/constants/app_constants.dart';
 import '../services/matching_service.dart';
-import '../../settings/providers/settings_provider.dart';
 
 class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
   final Ref ref;
@@ -21,13 +20,6 @@ class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
   }
 
   Future<bool> addProperty(PropertyModel property) async {
-    final settings = ref.read(settingsProvider);
-    final count = await DatabaseHelper.instance.getPropertiesCount();
-
-    if (!settings.isActivated && count >= AppConstants.freePropertyLimit) {
-      return false;
-    }
-
     final newId = await DatabaseHelper.instance.insertProperty(property);
     final inserted = property.copyWith(id: newId);
     state = [inserted, ...state];

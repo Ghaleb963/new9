@@ -78,10 +78,6 @@ void main() {
       expect(AppConstants.ownerStatuses, contains('ورثة'));
     });
 
-    test('free property limit should be 2', () {
-      expect(AppConstants.freePropertyLimit, 2);
-    });
-
     test('no list should have duplicates', () {
       void checkNoDuplicates(List<String> list, String name) {
         final unique = list.toSet();

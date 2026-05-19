@@ -33,14 +33,6 @@ extension EntryTypeParser on String {
 }
 
 class AppConstants {
-  // ─── ثوابت الأمان (Security Constants) ─────────────────────────────────────
-  static const String encryptionSalt = 'REAL_ESTATE_APP_2024';
-  static const String activationSecretKey = 'SECRET_KEY';
-  static const String logoutSalt = 'LOGOUT_SALT';
-
-  // ─── حدود النسخة المجانية ──────────────────────────────────────────────────
-  static const int freePropertyLimit = 2;
-
   // ─── قوائم البيانات الثابتة ─────────────────────────────────────────────────
   static const List<String> provinces = [
     'دمشق',

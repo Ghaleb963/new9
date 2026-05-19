@@ -249,44 +249,37 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
             const SnackBar(content: Text('تم تحديث السجل بنجاح')));
         Navigator.pop(context, true);
       } else {
-        final success =
-            await ref.read(propertyProvider.notifier).addProperty(property);
+        await ref.read(propertyProvider.notifier).addProperty(property);
         if (!mounted) return;
-        if (success) {
-          messenger
-              .showSnackBar(const SnackBar(content: Text('تمت الإضافة بنجاح')));
 
-          // ── نظام المطابقة الفورية ──────────────────────────────
-          final matches = ref.read(propertyProvider.notifier).findMatchesFor(property);
+        messenger
+            .showSnackBar(const SnackBar(content: Text('تمت الإضافة بنجاح')));
 
-          if (matches != null && matches.isNotEmpty && mounted) {
-            // نحفظ السياق ومرجع العقار قبل _resetForm() كي لا تُعاد
-            // بناء الـ Widget وتُلغى المتغيرات المؤقتة
-            final ctx = context;
-            final originProperty = property;
+        // ── نظام المطابقة الفورية ──────────────────────────────
+        final matches = ref.read(propertyProvider.notifier).findMatchesFor(property);
 
-            showMatchNotification(
-              context,
-              matches: matches,
-              onViewMatches: (results) {
-                Navigator.push(
-                  ctx,
-                  MaterialPageRoute(
-                    builder: (_) => MatchResultsView(
-                      matches: results,
-                      originProperty: originProperty,
-                    ),
+        if (matches != null && matches.isNotEmpty && mounted) {
+          final ctx = context;
+          final originProperty = property;
+
+          showMatchNotification(
+            context,
+            matches: matches,
+            onViewMatches: (results) {
+              Navigator.push(
+                ctx,
+                MaterialPageRoute(
+                  builder: (_) => MatchResultsView(
+                    matches: results,
+                    originProperty: originProperty,
                   ),
-                );
-              },
-            );
-          }
-
-          _resetForm();
-        } else {
-          messenger.showSnackBar(const SnackBar(
-              content: Text('يجب تفعيل التطبيق لإضافة أكثر من عقارين')));
+                ),
+              );
+            },
+          );
         }
+
+        _resetForm();
       }
     } catch (e) {
       if (!mounted) return;
