@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'dart:io';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'core/database/database_helper.dart';
 import 'core/theme/app_theme.dart';
 import 'features/properties/views/property_list_view.dart';
 import 'features/properties/views/add_property_view.dart';
@@ -11,11 +10,7 @@ import 'features/settings/views/settings_view.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-  }
+  await DatabaseHelper.init();
 
   runApp(const ProviderScope(child: RealEstateApp()));
 }

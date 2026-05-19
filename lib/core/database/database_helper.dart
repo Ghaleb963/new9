@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import '../../features/properties/models/property_model.dart';
 
@@ -61,6 +63,17 @@ class DatabaseHelper {
     if (_database != null) return _database!;
     _database = await _initDB();
     return _database!;
+  }
+
+  /// Eagerly initializes the database connection at app startup.
+  /// Call this in main() BEFORE runApp() so the sqflite platform
+  /// channel is fully wired before any widget attempts CRUD.
+  static Future<void> init() async {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+    await instance.database;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -133,24 +146,20 @@ class DatabaseHelper {
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    // تُطبق الترقيات بالترتيب الرقمي — حتى لو قفز المستخدم
-    // من v1 إلى v3 مباشرةً، ستنفذ كل الترقيات الوسيطة بالترتيب
     if (oldVersion < 2) await _migrateV1toV2(db);
     if (oldVersion < 3) await _migrateV2toV3(db);
-    // مستقبلاً: if (oldVersion < 4) await _migrateV3toV4(db);
   }
 
-  /// v1 → v2 : إضافة حقل entry_type (للمشروع القديم قبل الـ Type Classification)
+  /// v1 → v2 : إضافة حقل entry_type
   Future<void> _migrateV1toV2(Database db) async {
     await db.transaction((txn) async {
-      // DEFAULT 'offer' يضمن أن السجلات القديمة تُصنَّف كعروض تلقائياً
       await txn.execute(
         "ALTER TABLE $tableProperties ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'offer'",
       );
     });
   }
 
-  /// v2 → v3 : إضافة أختام زمنية لتتبع وقت الإنشاء والتعديل
+  /// v2 → v3 : إضافة أختام زمنية
   Future<void> _migrateV2toV3(Database db) async {
     await db.transaction((txn) async {
       await txn.execute(
@@ -159,8 +168,6 @@ class DatabaseHelper {
       await txn.execute(
         'ALTER TABLE $tableProperties ADD COLUMN updated_at TEXT',
       );
-      // تعيين created_at = updated_at للسجلات الموجودة
-      // (بقيمة وقت الترقية — أفضل من null)
       final now = DateTime.now().toIso8601String();
       await txn.update(
         tableProperties,
@@ -170,7 +177,7 @@ class DatabaseHelper {
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  CRUD — عمليات آمنة بـ Transaction + Error Handling
+  //  CRUD
   // ═══════════════════════════════════════════════════════════
 
   Future<int> insertProperty(PropertyModel property) async {
@@ -254,8 +261,6 @@ class DatabaseHelper {
     }
   }
 
-  /// التحقق من صحة ملف قاعدة البيانات المختار للاستعادة.
-  /// يضمن أن الملف يحتوي على table properties بجميع الأعمدة المتوقعة.
   Future<bool> isValidDatabase(String path) async {
     Database? tempDb;
     try {
