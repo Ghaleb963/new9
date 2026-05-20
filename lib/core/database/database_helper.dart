@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:sqflite/sqflite.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import '../../features/properties/models/property_model.dart';
 
@@ -56,24 +54,18 @@ class DatabaseHelper {
   // ═══════════════════════════════════════════════════════════
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+  static Future<Database>? _initFuture;
 
   DatabaseHelper._init();
 
+  /// Returns the database connection, lazily initializing it on first access.
+  /// Uses a cached Future to prevent race conditions when multiple callers
+  /// access the database concurrently before initialization completes.
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB();
+    _initFuture ??= _initDB();
+    _database = await _initFuture;
     return _database!;
-  }
-
-  /// Eagerly initializes the database connection at app startup.
-  /// Call this in main() BEFORE runApp() so the sqflite platform
-  /// channel is fully wired before any widget attempts CRUD.
-  static Future<void> init() async {
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      sqfliteFfiInit();
-      databaseFactory = databaseFactoryFfi;
-    }
-    await instance.database;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -142,7 +134,7 @@ class DatabaseHelper {
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  Migrations  (كل ترقية في دالة منفصلة = تركيبي + آمن)
+  //  Migrations
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {

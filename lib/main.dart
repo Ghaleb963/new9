@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'core/database/database_helper.dart';
 import 'core/theme/app_theme.dart';
 import 'features/properties/views/property_list_view.dart';
@@ -10,7 +12,16 @@ import 'features/settings/views/settings_view.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await DatabaseHelper.init();
+
+  // Desktop: FFI must complete before any database operation
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
+  // Eagerly start DB init in background — never block runApp()
+  // The database will be ready before the user can interact.
+  DatabaseHelper.instance.database;
 
   runApp(const ProviderScope(child: RealEstateApp()));
 }
