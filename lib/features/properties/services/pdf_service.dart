@@ -32,13 +32,27 @@ Future<Uint8List> _generatePdfInBackground(Map<String, dynamic> req) async {
   final isOffer = s['isOffer'] as bool;
   final pdf = pw.Document();
 
-  // Process images — each is read, decoded, resized, re-encoded in this
-  // background isolate. The original files on disk are never modified.
+  // Parallel image processing across CPU cores — each image is decoded,
+  // resized, and re-encoded in its own background isolate simultaneously.
+  final imageBytesList = await Future.wait(
+    images.map((path) => Isolate.run(() => _processImage(path))),
+  );
+
   final imageWidgets = <pw.Widget>[];
-  for (final imagePath in images) {
-    final widget = _processImage(imagePath);
-    if (widget != null) {
-      imageWidgets.add(widget);
+  for (final bytes in imageBytesList) {
+    if (bytes != null) {
+      imageWidgets.add(
+        pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 20),
+          child: pw.Center(
+            child: pw.Image(
+              pw.MemoryImage(bytes),
+              fit: pw.BoxFit.contain,
+              width: 450,
+            ),
+          ),
+        ),
+      );
     }
   }
 
@@ -162,35 +176,22 @@ Future<Uint8List> _generatePdfInBackground(Map<String, dynamic> req) async {
   return pdf.save();
 }
 
-pw.Widget? _processImage(String imagePath) {
+/// Reads, conditionally resizes (if width > 1000), and JPEG-encodes a single
+/// image.  Returns the processed bytes so they can be sent across isolates.
+/// The original file on disk is never modified.
+@pragma('vm:entry-point')
+Uint8List? _processImage(String path) {
   try {
-    final bytes = File(imagePath).readAsBytesSync();
+    final bytes = File(path).readAsBytesSync();
     final image = img.decodeImage(bytes);
     if (image == null) return null;
 
-    const int maxImageDimension = 600;
     img.Image resized = image;
-    if (image.width > maxImageDimension || image.height > maxImageDimension) {
-      if (image.width >= image.height) {
-        resized = img.copyResize(image, width: maxImageDimension);
-      } else {
-        resized = img.copyResize(image, height: maxImageDimension);
-      }
+    if (image.width > 1000) {
+      resized = img.copyResize(image, width: 1000);
     }
 
-    final processed = Uint8List.fromList(
-      img.encodeJpg(resized, quality: 52),
-    );
-    return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 20),
-      child: pw.Center(
-        child: pw.Image(
-          pw.MemoryImage(processed),
-          fit: pw.BoxFit.contain,
-          width: 450,
-        ),
-      ),
-    );
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 75));
   } catch (_) {
     return null;
   }
@@ -300,9 +301,20 @@ class PdfService {
 
     final imageWidgets = <pw.Widget>[];
     for (final imagePath in property.images) {
-      final widget = _processImage(imagePath);
-      if (widget != null) {
-        imageWidgets.add(widget);
+      final bytes = _processImage(imagePath);
+      if (bytes != null) {
+        imageWidgets.add(
+          pw.Container(
+            margin: const pw.EdgeInsets.only(bottom: 20),
+            child: pw.Center(
+              child: pw.Image(
+                pw.MemoryImage(bytes),
+                fit: pw.BoxFit.contain,
+                width: 450,
+              ),
+            ),
+          ),
+        );
       }
     }
 
