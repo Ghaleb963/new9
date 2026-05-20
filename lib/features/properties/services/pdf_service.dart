@@ -36,31 +36,10 @@ Future<Uint8List> _generatePdfInBackground(Map<String, dynamic> req) async {
   // background isolate. The original files on disk are never modified.
   final imageWidgets = <pw.Widget>[];
   for (final imagePath in images) {
-    try {
-      final bytes = await File(imagePath).readAsBytes();
-      final image = img.decodeImage(bytes);
-      if (image != null) {
-        img.Image resized = image;
-        if (image.width > 1000) {
-          resized = img.copyResize(image, width: 1000);
-        }
-        final processed = Uint8List.fromList(
-          img.encodeJpg(resized, quality: 75),
-        );
-        imageWidgets.add(
-          pw.Container(
-            margin: const pw.EdgeInsets.only(bottom: 20),
-            child: pw.Center(
-              child: pw.Image(
-                pw.MemoryImage(processed),
-                fit: pw.BoxFit.contain,
-                width: 450,
-              ),
-            ),
-          ),
-        );
-      }
-    } catch (_) {}
+    final widget = _processImage(imagePath);
+    if (widget != null) {
+      imageWidgets.add(widget);
+    }
   }
 
   final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
@@ -183,6 +162,40 @@ Future<Uint8List> _generatePdfInBackground(Map<String, dynamic> req) async {
   return pdf.save();
 }
 
+pw.Widget? _processImage(String imagePath) {
+  try {
+    final bytes = File(imagePath).readAsBytesSync();
+    final image = img.decodeImage(bytes);
+    if (image == null) return null;
+
+    const maxDim = 1024;
+    img.Image resized = image;
+    if (image.width > maxDim || image.height > maxDim) {
+      if (image.width >= image.height) {
+        resized = img.copyResize(image, width: maxDim);
+      } else {
+        resized = img.copyResize(image, height: maxDim);
+      }
+    }
+
+    final processed = Uint8List.fromList(
+      img.encodeJpg(resized, quality: 72),
+    );
+    return pw.Container(
+      margin: const pw.EdgeInsets.only(bottom: 20),
+      child: pw.Center(
+        child: pw.Image(
+          pw.MemoryImage(processed),
+          fit: pw.BoxFit.contain,
+          width: 450,
+        ),
+      ),
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 String _ar(String text) {
   return ArabicReshaper.instance.reshape(text);
 }
@@ -287,31 +300,10 @@ class PdfService {
 
     final imageWidgets = <pw.Widget>[];
     for (final imagePath in property.images) {
-      try {
-        final bytes = await File(imagePath).readAsBytes();
-        final image = img.decodeImage(bytes);
-        if (image != null) {
-          img.Image resized = image;
-          if (image.width > 1000) {
-            resized = img.copyResize(image, width: 1000);
-          }
-          final processed = Uint8List.fromList(
-            img.encodeJpg(resized, quality: 75),
-          );
-          imageWidgets.add(
-            pw.Container(
-              margin: const pw.EdgeInsets.only(bottom: 20),
-              child: pw.Center(
-                child: pw.Image(
-                  pw.MemoryImage(processed),
-                  fit: pw.BoxFit.contain,
-                  width: 450,
-                ),
-              ),
-            ),
-          );
-        }
-      } catch (_) {}
+      final widget = _processImage(imagePath);
+      if (widget != null) {
+        imageWidgets.add(widget);
+      }
     }
 
     final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
