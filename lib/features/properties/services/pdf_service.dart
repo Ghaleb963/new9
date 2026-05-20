@@ -168,18 +168,18 @@ pw.Widget? _processImage(String imagePath) {
     final image = img.decodeImage(bytes);
     if (image == null) return null;
 
-    const maxDim = 1024;
+    const int maxImageDimension = 600;
     img.Image resized = image;
-    if (image.width > maxDim || image.height > maxDim) {
+    if (image.width > maxImageDimension || image.height > maxImageDimension) {
       if (image.width >= image.height) {
-        resized = img.copyResize(image, width: maxDim);
+        resized = img.copyResize(image, width: maxImageDimension);
       } else {
-        resized = img.copyResize(image, height: maxDim);
+        resized = img.copyResize(image, height: maxImageDimension);
       }
     }
 
     final processed = Uint8List.fromList(
-      img.encodeJpg(resized, quality: 72),
+      img.encodeJpg(resized, quality: 52),
     );
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 20),
