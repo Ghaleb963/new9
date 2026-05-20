@@ -87,8 +87,11 @@ class DatabaseHelper {
 
   /// ضبط إعدادات SQLite عند فتح الاتصال
   Future<void> _configureDB(Database db) async {
-    await db.execute('PRAGMA journal_mode=WAL');
-    await db.execute('PRAGMA foreign_keys=ON');
+    // PRAGMA journal_mode=WAL returns a result row, so Android's
+    // SQLiteDatabase.execSQL() rejects it with "code 0 SQLITE_OK".
+    // Using rawQuery instead of execute satisfies the Android driver.
+    await db.rawQuery('PRAGMA journal_mode=WAL');
+    await db.rawQuery('PRAGMA foreign_keys=ON');
   }
 
   /// يُستدعى مرة واحدة فقط عند إنشاء DB لأول مرة
