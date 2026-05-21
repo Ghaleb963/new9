@@ -262,7 +262,10 @@ class PdfService {
           imageWidgets.add(_buildImageWidget(processed));
         }
       }
+      results.clear();
     }
+
+    await Future.delayed(Duration.zero);
 
     pdf.addPage(
       pw.MultiPage(
@@ -347,7 +350,7 @@ class PdfService {
     final results = List<Uint8List?>.filled(paths.length, null);
     int nextIndex = 0;
     int completed = 0;
-    const maxConcurrent = 2;
+    const maxConcurrent = 1;
 
     Future<void> worker() async {
       while (true) {

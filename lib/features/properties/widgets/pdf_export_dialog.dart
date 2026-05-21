@@ -33,7 +33,7 @@ class _PdfExportDialogState extends State<PdfExportDialog>
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
     _pulseAnim = Tween<double>(begin: 0.85, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOutSine),
     );
     _total = widget.imageCount;
     _start();
@@ -63,6 +63,9 @@ class _PdfExportDialogState extends State<PdfExportDialog>
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final statusColor = _building ? AppTheme.accentGreen : AppTheme.accentAmber;
+
     return PopScope(
       canPop: false,
       child: Center(
@@ -83,78 +86,99 @@ class _PdfExportDialogState extends State<PdfExportDialog>
                   scale: _building ? 1.0 : _pulseAnim.value,
                   child: child,
                 ),
-                child: Container(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.easeInOut,
                   width: 64,
                   height: 64,
                   decoration: BoxDecoration(
-                    color: (_building ? AppTheme.accentGreen : AppTheme.accentAmber)
-                        .withValues(alpha: 0.12),
+                    color: statusColor.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
-                    child: _building
-                        ? const Icon(
-                            Icons.picture_as_pdf_rounded,
-                            color: AppTheme.accentGreen,
-                            size: 32,
-                          )
-                        : const SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 3,
-                              color: AppTheme.accentAmber,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: _building
+                          ? const Icon(
+                              Icons.picture_as_pdf_rounded,
+                              color: AppTheme.accentGreen,
+                              size: 32,
+                              key: ValueKey('pdf'),
+                            )
+                          : const SizedBox(
+                              width: 28,
+                              height: 28,
+                              key: ValueKey('spinner'),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 3,
+                                color: AppTheme.accentAmber,
+                              ),
                             ),
-                          ),
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 20),
-              Text(
-                _building
-                    ? 'جاري إنشاء التقرير...'
-                    : 'جاري معالجة الصور...',
-                style: const TextStyle(
-                  color: AppTheme.textHigh,
-                  fontSize: AppTheme.fontLg,
-                  fontWeight: FontWeight.w600,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: Text(
+                  key: ValueKey('status_$_building'),
+                  _building
+                      ? 'جاري إنشاء التقرير...'
+                      : 'جاري معالجة الصور...',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: AppTheme.textHigh,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                _building
-                    ? 'يتم تجميع البيانات في ملف PDF'
-                    : '$_completed من $_total صور',
-                style: const TextStyle(
-                  color: AppTheme.textMedium,
-                  fontSize: AppTheme.fontSm,
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: Text(
+                  key: ValueKey('sub_${_building}_$_completed'),
+                  _building
+                      ? 'يتم تجميع البيانات في ملف PDF'
+                      : _total > 0
+                          ? '$_completed من $_total صور'
+                          : '',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppTheme.textMedium,
+                  ),
                 ),
               ),
-              if (_total > 0) ...[
-                const SizedBox(height: 20),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: _completed / _total,
-                    minHeight: 6,
-                    backgroundColor: AppTheme.borderMedium,
-                    color: _building
-                        ? AppTheme.accentGreen
-                        : AppTheme.accentAmber,
+              if (_total > 0)
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 300),
+                  opacity: 1.0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 20),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _completed / _total,
+                          minHeight: 6,
+                          backgroundColor: AppTheme.borderMedium,
+                          color: statusColor,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: Text(
+                          key: ValueKey('pct_${(_completed / _total * 100).round()}'),
+                          '${(_completed / _total * 100).round()}%',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: statusColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  '${(_completed / _total * 100).round()}%',
-                  style: TextStyle(
-                    color: _building
-                        ? AppTheme.accentGreen
-                        : AppTheme.accentAmber,
-                    fontSize: AppTheme.fontXs,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
             ],
           ),
         ),
