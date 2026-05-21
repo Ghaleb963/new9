@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
-import 'dart:math';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -29,14 +29,12 @@ class _PdfImageConfig {
   });
 }
 
-// Aggressive optimization for weak devices
 const _kWeakDeviceConfig = _PdfImageConfig(
   maxWidth: 400,
   jpegQuality: 45,
   maxImagesInPdf: 4,
 );
 
-// Balanced config for normal devices
 const _kNormalConfig = _PdfImageConfig(
   maxWidth: 600,
   jpegQuality: 60,
@@ -45,7 +43,6 @@ const _kNormalConfig = _PdfImageConfig(
 
 // ════════════════════════════════════════════════════════
 // Singleton queue for sequential PDF generation
-// Prevents CPU overload when multiple PDFs are requested
 // ════════════════════════════════════════════════════════
 class _PdfGenerationQueue {
   static final _PdfGenerationQueue _instance = _PdfGenerationQueue._();
@@ -113,33 +110,80 @@ class _DeviceCapability {
   static bool get isWeak {
     if (_isWeakDevice != null) return _isWeakDevice!;
 
-    // Detect weak devices by checking platform and available info
     if (Platform.isAndroid) {
-      // Android devices are more likely to be weak
       _isWeakDevice = true;
     } else if (Platform.isIOS) {
       _isWeakDevice = false;
     } else {
-      // Desktop: assume capable
       _isWeakDevice = false;
     }
 
     return _isWeakDevice!;
   }
-
-  static _PdfImageConfig get config =>
-      isWeak ? _kWeakDeviceConfig : _kNormalConfig;
 }
 
 // ════════════════════════════════════════════════════════
-// Image processing — runs on isolate
+// ISOLATE ENTRY POINTS — Top-level functions for compute/Isolate.run
+//
+// ALL heavy work happens here:
+// 1. File I/O (readAsBytes) — inside isolate, not on main thread
+// 2. Image decoding, resizing, compression — inside isolate
+// 3. PDF document construction — inside isolate
+//
+// Main thread only handles: font loading (Flutter API), cache I/O, UI updates
 // ════════════════════════════════════════════════════════
-Uint8List? _processImageBytes(Uint8List rawBytes) {
+
+/// Complete PDF generation inside an isolate.
+/// Receives font bytes and property data as serializable types.
+/// Returns the final PDF bytes.
+///
+/// This function does ALL heavy work:
+/// - Reads image files from disk
+/// - Decodes, resizes, compresses images
+/// - Builds the PDF document with Arabic text
+/// - Serializes the PDF to bytes
+Future<Uint8List> _generatePdfInIsolate(_IsolatePdfInput input) async {
+  final config = input.isWeakDevice ? _kWeakDeviceConfig : _kNormalConfig;
+
+  // Step 1: Read and process images FROM DISK inside the isolate
+  final imageBytes = <Uint8List>[];
+  final limitedPaths = input.imagePaths.take(config.maxImagesInPdf).toList();
+
+  for (final path in limitedPaths) {
+    try {
+      final rawBytes = await File(path).readAsBytes();
+      final processed = _processImageBytesIsolated(rawBytes, config);
+      if (processed != null) {
+        imageBytes.add(processed);
+      }
+    } catch (_) {
+      // Skip failed images
+    }
+  }
+
+  // Step 2: Build PDF document inside the isolate
+  final pdf = await _buildPdfDocument(
+    imageBytes: imageBytes,
+    propertyMap: input.propertyMap,
+    officeName: input.officeName,
+    officePhone: input.officePhone,
+    isOffer: input.isOffer,
+    fontBytes: input.fontBytes,
+    boldFontBytes: input.boldFontBytes,
+  );
+
+  return pdf;
+}
+
+/// Image processing — runs entirely inside isolate.
+/// Receives raw bytes, returns compressed JPEG.
+Uint8List? _processImageBytesIsolated(
+  Uint8List rawBytes,
+  _PdfImageConfig config,
+) {
   try {
     final image = img.decodeImage(rawBytes);
     if (image == null) return null;
-
-    final config = _DeviceCapability.config;
 
     img.Image resized = image;
     if (image.width > config.maxWidth) {
@@ -153,6 +197,98 @@ Uint8List? _processImageBytes(Uint8List rawBytes) {
     return null;
   }
 }
+
+/// Builds the complete PDF document inside the isolate.
+/// All parameters are serializable types (no Flutter objects).
+Future<Uint8List> _buildPdfDocument({
+  required List<Uint8List> imageBytes,
+  required Map<String, dynamic> propertyMap,
+  required String officeName,
+  required String officePhone,
+  required bool isOffer,
+  required Uint8List fontBytes,
+  required Uint8List boldFontBytes,
+}) {
+  final property = PropertyModel.fromMap(propertyMap);
+  final arabicFont = pw.Font.ttf(fontBytes.buffer.asByteData());
+  final arabicBoldFont = pw.Font.ttf(boldFontBytes.buffer.asByteData());
+
+  final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
+  final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
+
+  final imageWidgets = imageBytes
+      .map(
+        (b) => pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 20),
+          child: pw.Center(
+            child: pw.Image(
+              pw.MemoryImage(b),
+              fit: pw.BoxFit.contain,
+              width: 400,
+            ),
+          ),
+        ),
+      )
+      .toList();
+
+  final pdf = pw.Document(
+    title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
+    author: officeName.isNotEmpty ? officeName : 'Real Estate App',
+    subject: '${property.propertyType} - ${property.province}',
+  );
+
+  pdf.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      theme: pw.ThemeData.withFont(
+        base: arabicFont,
+        bold: arabicBoldFont,
+      ),
+      build: (_) => [
+        _buildPdfContent(
+          imageWidgets,
+          property,
+          officeName,
+          officePhone,
+          isOffer,
+          arabicBoldFont,
+          entryPdfColor,
+          dividerColor,
+        ),
+      ],
+    ),
+  );
+
+  return pdf.save();
+}
+
+/// Input data package for isolate PDF generation.
+/// All fields are serializable across isolate boundaries.
+class _IsolatePdfInput {
+  final Map<String, dynamic> propertyMap;
+  final List<String> imagePaths;
+  final String officeName;
+  final String officePhone;
+  final bool isOffer;
+  final bool isWeakDevice;
+  final Uint8List fontBytes;
+  final Uint8List boldFontBytes;
+
+  _IsolatePdfInput({
+    required this.propertyMap,
+    required this.imagePaths,
+    required this.officeName,
+    required this.officePhone,
+    required this.isOffer,
+    required this.isWeakDevice,
+    required this.fontBytes,
+    required this.boldFontBytes,
+  });
+}
+
+// ════════════════════════════════════════════════════════
+// PDF content builder (pure layout, runs inside isolate)
+// ════════════════════════════════════════════════════════
 
 String _ar(String text) {
   try {
@@ -314,47 +450,97 @@ pw.Widget _buildPdfContent(
 }
 
 // ════════════════════════════════════════════════════════
-// PdfService — Professional optimized PDF generation
-//
-// تحسينات الأداء:
-// 1. طابور تسلسلي لتوليد PDF — يمنع ازدحام CPU
-// 2. توليد عند الطلب فقط (Lazy) — لا توليد تلقائي عند الإضافة
-// 3. معالجة صور متكيفة مع الجهاز — جودة أقل للأجهزة الضعيفة
-// 4. حد أقصى لعدد الصور في PDF — 4 للضعيفة، 8 للعادية
-// 5. ذاكرة تخزين مؤقت مع حد حجم — حذف الملفات القديمة تلقائياً
-// 6. إعادة استخدام الخطوط المحمّلة — لا إعادة تحميل
-// 7. مهلة زمنية لعملية التوليد — منع التعليق
+// PdfService — Public API
 // ════════════════════════════════════════════════════════
 class PdfService {
-  static pw.Font? _cachedFont;
-  static pw.Font? _cachedBoldFont;
+  static Uint8List? _cachedFontBytes;
+  static Uint8List? _cachedBoldFontBytes;
 
   // Cache size limit: 50 MB
   static const int _maxCacheSizeBytes = 50 * 1024 * 1024;
 
-  // Generation timeout: 30 seconds
-  static const Duration _generationTimeout = Duration(seconds: 30);
+  // Generation timeout: 45 seconds (isolate adds slight overhead)
+  static const Duration _generationTimeout = Duration(seconds: 45);
 
   // ═══════════════════════════════════════════════════
-  // Public API — Lazy generation (on-demand only)
+  // Font loading (main thread — requires Flutter APIs)
   // ═══════════════════════════════════════════════════
 
-  /// Generates PDF with timeout protection.
-  /// No automatic background generation — only when user explicitly requests.
+  static Future<(Uint8List, Uint8List)> _loadFontBytes() async {
+    if (_cachedFontBytes != null && _cachedBoldFontBytes != null) {
+      return (_cachedFontBytes!, _cachedBoldFontBytes!);
+    }
+
+    try {
+      final regular =
+          (await rootBundle.load('assets/fonts/Cairo-Regular.ttf'))
+              .buffer
+              .asUint8List();
+      final bold =
+          (await rootBundle.load('assets/fonts/Cairo-Bold.ttf'))
+              .buffer
+              .asUint8List();
+      _cachedFontBytes = regular;
+      _cachedBoldFontBytes = bold;
+      return (regular, bold);
+    } catch (e) {
+      debugPrint('PdfService: Cairo font error: $e, trying Google Fonts');
+      try {
+        await PdfGoogleFonts.notoSansArabicRegular();
+        await PdfGoogleFonts.notoSansArabicBold();
+        _cachedFontBytes = Uint8List(0);
+        _cachedBoldFontBytes = Uint8List(0);
+        return (Uint8List(0), Uint8List(0));
+      } catch (e2) {
+        debugPrint(
+          'PdfService: Google Fonts error: $e2, using built-in fallback',
+        );
+        _cachedFontBytes = Uint8List(0);
+        _cachedBoldFontBytes = Uint8List(0);
+        return (Uint8List(0), Uint8List(0));
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // Public API — Full isolate-based generation
+  // ═══════════════════════════════════════════════════
+
+  /// Generates PDF with ALL heavy work in an isolate:
+  /// - File I/O (reading images from disk)
+  /// - Image decoding, resizing, compression
+  /// - PDF document construction
+  ///
+  /// Main thread only loads fonts (Flutter API) and manages cache.
   static Future<Uint8List> generatePropertyPdf({
     required PropertyModel property,
     required SettingsState settings,
     void Function(int completed, int total)? onProgress,
   }) async {
     try {
-      final (arabicFont, arabicBoldFont) = await _loadFonts();
-      return await _generate(
-        property,
-        settings,
-        arabicFont,
-        arabicBoldFont,
-        onProgress: onProgress,
+      final (fontBytes, boldFontBytes) = await _loadFontBytes();
+      final isOffer = property.entryType == EntryType.offer;
+
+      final input = _IsolatePdfInput(
+        propertyMap: property.toMap(),
+        imagePaths: property.images,
+        officeName: settings.officeName,
+        officePhone: settings.officePhone,
+        isOffer: isOffer,
+        isWeakDevice: _DeviceCapability.isWeak,
+        fontBytes: fontBytes,
+        boldFontBytes: boldFontBytes,
+      );
+
+      onProgress?.call(0, 1);
+
+      // ALL heavy work runs in background isolate — zero main-thread blocking
+      final bytes = await Isolate.run<Uint8List>(
+        () => _generatePdfInIsolate(input),
       ).timeout(_generationTimeout);
+
+      onProgress?.call(1, 1);
+      return bytes;
     } catch (e, stack) {
       debugPrint('PdfService: generatePropertyPdf failed: $e\n$stack');
       return _emergencyPdf(property);
@@ -362,16 +548,11 @@ class PdfService {
   }
 
   /// Enqueues PDF generation in the sequential queue.
-  /// Used for background pre-generation without blocking the UI.
-  /// Returns immediately — PDF is generated when queue is ready.
   static Future<void> enqueueForBackgroundCache({
     required PropertyModel property,
     required SettingsState settings,
   }) async {
-    // Don't enqueue if device is weak — save CPU for UI responsiveness
     if (_DeviceCapability.isWeak) return;
-
-    // Don't enqueue if queue is already backed up
     if (_PdfGenerationQueue().pendingCount >= 3) return;
 
     final task = _PdfTask(property: property, settings: settings);
@@ -383,7 +564,6 @@ class PdfService {
   }
 
   /// Gets cached PDF or generates on-demand.
-  /// Primary method for user-initiated PDF export.
   static Future<Uint8List> getCachedPdf({
     required PropertyModel property,
     required SettingsState settings,
@@ -428,201 +608,42 @@ class PdfService {
   }
 
   // ═══════════════════════════════════════════════════
-  // Internal — PDF generation engine
+  // Emergency PDF (main thread fallback)
   // ═══════════════════════════════════════════════════
-
-  static Future<Uint8List> _generate(
-    PropertyModel property,
-    SettingsState settings,
-    pw.Font arabicFont,
-    pw.Font arabicBoldFont, {
-    void Function(int completed, int total)? onProgress,
-  }) async {
-    final isOffer = property.entryType == EntryType.offer;
-
-    final imageList = <Uint8List>[];
-    final config = _DeviceCapability.config;
-
-    if (property.images.isNotEmpty) {
-      // Limit images to config max — skip extras for performance
-      final limitedPaths = property.images.take(config.maxImagesInPdf).toList();
-
-      final results = await _processImagesConcurrently(
-        limitedPaths,
-        onProgress: onProgress,
-      );
-      for (final r in results) {
-        if (r != null) imageList.add(r);
-      }
-    }
-
-    onProgress?.call(1, 1);
-    await Future.delayed(Duration.zero);
-
-    final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
-    final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
-
-    final imageWidgets = imageList
-        .map(
-          (b) => pw.Container(
-            margin: const pw.EdgeInsets.only(bottom: 20),
-            child: pw.Center(
-              child: pw.Image(
-                pw.MemoryImage(b),
-                fit: pw.BoxFit.contain,
-                width: 400,
-              ),
-            ),
-          ),
-        )
-        .toList();
-
-    final pdf = pw.Document(
-      title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
-      author:
-          settings.officeName.isNotEmpty ? settings.officeName : 'Real Estate App',
-      subject: '${property.propertyType} - ${property.province}',
-    );
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        theme: pw.ThemeData.withFont(
-          base: arabicFont,
-          bold: arabicBoldFont,
-        ),
-        build: (_) => [
-          _buildPdfContent(
-            imageWidgets,
-            property,
-            settings.officeName,
-            settings.officePhone,
-            isOffer,
-            arabicBoldFont,
-            entryPdfColor,
-            dividerColor,
-          ),
-        ],
-      ),
-    );
-
-    return pdf.save();
-  }
 
   static Future<Uint8List> _emergencyPdf(PropertyModel property) async {
-    final (arabicFont, arabicBoldFont) = await _loadFonts();
-    final emergency = pw.Document();
-    emergency.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        theme: pw.ThemeData.withFont(
-          base: arabicFont,
-          bold: arabicBoldFont,
-        ),
-        build: (_) => pw.Center(
-          child: pw.Text(
-            '${_ar(property.propertyType)}\n${property.province}\n${_ar('تقرير عقار')}',
-            style: pw.TextStyle(font: arabicBoldFont, fontSize: 18),
+    try {
+      final (fontBytes, boldFontBytes) = await _loadFontBytes();
+      final arabicFont = pw.Font.ttf(fontBytes.buffer.asByteData());
+      final arabicBoldFont = pw.Font.ttf(boldFontBytes.buffer.asByteData());
+
+      final emergency = pw.Document();
+      emergency.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          theme: pw.ThemeData.withFont(
+            base: arabicFont,
+            bold: arabicBoldFont,
+          ),
+          build: (_) => pw.Center(
+            child: pw.Text(
+              '${_ar(property.propertyType)}\n${property.province}\n${_ar('تقرير عقار')}',
+              style: pw.TextStyle(font: arabicBoldFont, fontSize: 18),
+            ),
           ),
         ),
-      ),
-    );
-    return emergency.save();
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Internal — Image processing
-  // ═══════════════════════════════════════════════════
-
-  static Future<List<Uint8List?>> _processImagesConcurrently(
-    List<String> paths, {
-    void Function(int completed, int total)? onProgress,
-  }) async {
-    if (paths.isEmpty) return [];
-
-    final results = List<Uint8List?>.filled(paths.length, null);
-
-    // Process images one-by-one on weak devices to avoid memory pressure
-    // Process in parallel (up to 2 concurrent) on capable devices
-    if (_DeviceCapability.isWeak) {
-      for (int i = 0; i < paths.length; i++) {
-        try {
-          final bytes = await File(paths[i]).readAsBytes();
-          results[i] = await compute(_processImageBytes, bytes);
-        } catch (e) {
-          debugPrint('PdfService: failed image $i: $e');
-        }
-        onProgress?.call(i + 1, paths.length);
-      }
-    } else {
-      // Capable device: process up to 2 images concurrently
-      const concurrencyLimit = 2;
-      for (int start = 0; start < paths.length; start += concurrencyLimit) {
-        final end = min(start + concurrencyLimit, paths.length);
-        final futures = <Future<void>>[];
-
-        for (int i = start; i < end; i++) {
-          final index = i;
-          futures.add(
-            File(paths[i])
-                .readAsBytes()
-                .then((bytes) => compute(_processImageBytes, bytes))
-                .then((result) => results[index] = result)
-                .catchError((e) {
-                  debugPrint('PdfService: failed image $i: $e');
-                  return null;
-                })
-                .whenComplete(() => onProgress?.call(index + 1, paths.length)),
-          );
-        }
-
-        await Future.wait(futures);
-      }
-    }
-
-    return results;
-  }
-
-  // ═══════════════════════════════════════════════════
-  // Internal — Font loading (cached)
-  // ═══════════════════════════════════════════════════
-
-  static Future<(pw.Font, pw.Font)> _loadFonts() async {
-    if (_cachedFont != null && _cachedBoldFont != null) {
-      return (_cachedFont!, _cachedBoldFont!);
-    }
-
-    try {
-      final regular =
-          (await rootBundle.load('assets/fonts/Cairo-Regular.ttf'))
-              .buffer
-              .asUint8List();
-      final bold =
-          (await rootBundle.load('assets/fonts/Cairo-Bold.ttf'))
-              .buffer
-              .asUint8List();
-      _cachedFont = pw.Font.ttf(regular.buffer.asByteData());
-      _cachedBoldFont = pw.Font.ttf(bold.buffer.asByteData());
-      return (_cachedFont!, _cachedBoldFont!);
-    } catch (e) {
-      debugPrint('PdfService: Cairo font error: $e, trying Google Fonts');
-      try {
-        _cachedFont = await PdfGoogleFonts.notoSansArabicRegular();
-        _cachedBoldFont = await PdfGoogleFonts.notoSansArabicBold();
-        return (_cachedFont!, _cachedBoldFont!);
-      } catch (e2) {
-        debugPrint(
-          'PdfService: Google Fonts error: $e2, using built-in fallback',
-        );
-        _cachedFont = pw.Font.helvetica();
-        _cachedBoldFont = pw.Font.helveticaBold();
-        return (_cachedFont!, _cachedBoldFont!);
-      }
+      );
+      return emergency.save();
+    } catch (_) {
+      // Absolute last resort — return empty PDF
+      return Uint8List.fromList([
+        0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34,
+      ]);
     }
   }
 
   // ═══════════════════════════════════════════════════
-  // Internal — Cache management with size limits
+  // Cache management
   // ═══════════════════════════════════════════════════
 
   static Future<void> _saveToCache(int? propertyId, Uint8List bytes) async {
@@ -647,7 +668,6 @@ class PdfService {
 
   static String _cacheFileName(int propertyId) => 'property_$propertyId.pdf';
 
-  /// Enforces cache size limit by deleting oldest files first.
   static Future<void> _enforceCacheLimit() async {
     try {
       final dir = await _getCacheDir();
@@ -667,7 +687,6 @@ class PdfService {
 
       if (totalSize <= _maxCacheSizeBytes) return;
 
-      // Sort by modification time (oldest first)
       final sortedFiles = fileSizes.keys.toList();
       sortedFiles.sort((a, b) {
         final aStat = a.lastModifiedSync();
@@ -675,7 +694,6 @@ class PdfService {
         return aStat.compareTo(bStat);
       });
 
-      // Delete oldest files until under limit
       for (final file in sortedFiles) {
         if (totalSize <= _maxCacheSizeBytes) break;
         final size = fileSizes[file]!;
@@ -691,7 +709,6 @@ class PdfService {
   // Public API — Cache invalidation
   // ═══════════════════════════════════════════════════
 
-  /// Deletes cached PDF for a specific property.
   static Future<void> invalidateCache(int propertyId) async {
     try {
       final dir = await _getCacheDir();
@@ -704,7 +721,6 @@ class PdfService {
     }
   }
 
-  /// Deletes all cached PDFs (e.g., when office info changes).
   static Future<void> invalidateAllCache() async {
     try {
       final dir = await _getCacheDir();

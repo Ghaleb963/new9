@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/property_provider.dart';
@@ -7,63 +8,97 @@ import '../../../core/widgets/app_empty_state.dart';
 import '../widgets/property_card.dart';
 import '../widgets/filter_widgets.dart';
 
-class PropertyListView extends ConsumerWidget {
+class PropertyListView extends StatefulWidget {
   const PropertyListView({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final filteredProperties = ref.watch(filteredPropertiesProvider);
-    final filter = ref.watch(propertyFilterProvider);
-    final activeFilterCount = _countActiveFilters(filter);
+  State<PropertyListView> createState() => _PropertyListViewState();
+}
 
-    return Scaffold(
-      backgroundColor: AppTheme.bgPage,
-      appBar: AppBar(
-        backgroundColor: AppTheme.bgPage,
-        title: const Text('عقاراتي'),
-        actions: [
-          _FilterButton(
-            count: activeFilterCount,
-            onTap: () => _showFilterBottomSheet(context, ref),
-          ),
-          const SizedBox(width: AppTheme.sp8),
-        ],
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(60),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              AppTheme.sp16,
-              0,
-              AppTheme.sp16,
-              AppTheme.sp12,
+class _PropertyListViewState extends State<PropertyListView> {
+  Timer? _searchDebounce;
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String val, WidgetRef ref) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      ref.read(propertyFilterProvider.notifier).update(
+            (s) => s.copyWith(query: val),
+          );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer(
+      builder: (context, ref, child) {
+        final filter = ref.watch(propertyFilterProvider);
+        final activeFilterCount = _countActiveFilters(filter);
+
+        return Scaffold(
+          backgroundColor: AppTheme.bgPage,
+          appBar: AppBar(
+            backgroundColor: AppTheme.bgPage,
+            title: const Text('عقاراتي'),
+            actions: [
+              _FilterButton(
+                count: activeFilterCount,
+                onTap: () => _showFilterBottomSheet(context, ref),
+              ),
+              const SizedBox(width: AppTheme.sp8),
+            ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(60),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTheme.sp16,
+                  0,
+                  AppTheme.sp16,
+                  AppTheme.sp12,
+                ),
+                child: _SearchBar(onSearchChanged: _onSearchChanged),
+              ),
             ),
-            child: _SearchBar(),
           ),
-        ),
-      ),
-      body: Column(
-        children: [
-          const _StatsBar(),
-          const _EntryTypeTabBar(),
-          Expanded(
-            child: filteredProperties.isEmpty
-                ? _buildEmptyState(activeFilterCount, ref)
-                : ListView.builder(
-                    padding: const EdgeInsets.only(
-                      top: AppTheme.sp8,
-                      bottom: AppTheme.sp24,
-                    ),
-                    cacheExtent: 1200,
-                    itemCount: filteredProperties.length,
-                    itemBuilder: (context, index) {
-                      return PropertyCard(
-                        property: filteredProperties[index],
-                      );
-                    },
+          body: Column(
+            children: [
+              const _StatsBar(),
+              const _EntryTypeTabBar(),
+              Expanded(
+                child: ref.watch(filteredPropertiesProvider).when(
+                  data: (filteredProperties) {
+                    if (filteredProperties.isEmpty) {
+                      return _buildEmptyState(activeFilterCount, ref);
+                    }
+                    return ListView.builder(
+                      padding: const EdgeInsets.only(
+                        top: AppTheme.sp8,
+                        bottom: AppTheme.sp24,
+                      ),
+                      cacheExtent: 600,
+                      itemCount: filteredProperties.length,
+                      itemBuilder: (context, index) {
+                        return PropertyCard(
+                          property: filteredProperties[index],
+                        );
+                      },
+                    );
+                  },
+                  loading: () => const Center(
+                    child: CircularProgressIndicator(),
                   ),
+                  error: (_, __) => _buildEmptyState(activeFilterCount, ref),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -113,39 +148,42 @@ class PropertyListView extends ConsumerWidget {
 }
 
 // ── Search Bar ──────────────────────────────────────────────────────────────────
-class _SearchBar extends ConsumerWidget {
-  const _SearchBar();
+class _SearchBar extends StatelessWidget {
+  final void Function(String, WidgetRef) onSearchChanged;
+  const _SearchBar({required this.onSearchChanged});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Container(
-      height: 44,
-      decoration: BoxDecoration(
-        color: AppTheme.bgSurface,
-        borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-        border: Border.all(color: AppTheme.borderSubtle),
-      ),
-      child: TextField(
-        style: const TextStyle(
-          color: AppTheme.textHigh,
-          fontSize: AppTheme.fontMd,
-        ),
-        decoration: const InputDecoration(
-          hintText: 'بحث بالمنطقة، النوع، المالك...',
-          hintStyle:
-              TextStyle(color: AppTheme.textLow, fontSize: AppTheme.fontSm),
-          prefixIcon:
-              Icon(Icons.search_rounded, color: AppTheme.textLow, size: 20),
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(vertical: 12),
-          filled: false,
-        ),
-        onChanged: (val) => ref.read(propertyFilterProvider.notifier).update(
-              (s) => s.copyWith(query: val),
+  Widget build(BuildContext context) {
+    return Consumer(
+      builder: (context, ref, child) {
+        return Container(
+          height: 44,
+          decoration: BoxDecoration(
+            color: AppTheme.bgSurface,
+            borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+            border: Border.all(color: AppTheme.borderSubtle),
+          ),
+          child: TextField(
+            style: const TextStyle(
+              color: AppTheme.textHigh,
+              fontSize: AppTheme.fontMd,
             ),
-      ),
+            decoration: const InputDecoration(
+              hintText: 'بحث بالمنطقة، النوع، المالك...',
+              hintStyle:
+                  TextStyle(color: AppTheme.textLow, fontSize: AppTheme.fontSm),
+              prefixIcon:
+                  Icon(Icons.search_rounded, color: AppTheme.textLow, size: 20),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(vertical: 12),
+              filled: false,
+            ),
+            onChanged: (val) => onSearchChanged(val, ref),
+          ),
+        );
+      },
     );
   }
 }
@@ -211,7 +249,7 @@ class _FilterButton extends StatelessWidget {
   }
 }
 
-// ── Entry Type Tab Bar ────────────────────────────────────────────────────────
+// ── Entry Type Tab Bar ──
 class _EntryTypeTabBar extends ConsumerWidget {
   const _EntryTypeTabBar();
 
@@ -310,7 +348,7 @@ class _TabChip extends StatelessWidget {
   }
 }
 
-// ── Stats Bar ─────────────────────────────────────────────────────────────────
+// ── Stats Bar ──
 class _StatsBar extends ConsumerWidget {
   const _StatsBar();
 
@@ -335,20 +373,20 @@ class _StatsBar extends ConsumerWidget {
         children: [
           _StatChip(
               label: 'الكل', value: stats.total, color: AppTheme.textMedium),
-          _Divider(),
+          const _Divider(),
           _StatChip(
               label: 'عروض', value: stats.offers, color: AppTheme.accentGreen),
-          _Divider(),
+          const _Divider(),
           _StatChip(
               label: 'طلبات',
               value: stats.requirements,
               color: AppTheme.accentAmber),
-          _Divider(),
+          const _Divider(),
           _StatChip(
               label: 'متاح',
               value: stats.available,
               color: AppTheme.accentTeal),
-          _Divider(),
+          const _Divider(),
           _StatChip(
               label: 'مباع', value: stats.sold, color: AppTheme.accentRed),
         ],
@@ -358,6 +396,8 @@ class _StatsBar extends ConsumerWidget {
 }
 
 class _Divider extends StatelessWidget {
+  const _Divider();
+
   @override
   Widget build(BuildContext context) {
     return Container(

@@ -72,30 +72,47 @@ final matchesFilterProvider =
   return MatchesFilterNotifier();
 });
 
-final filteredMatchesProvider = Provider<List<MatchResult>>((ref) {
-  final allMatches = ref.watch(allMatchesProvider);
+/// Filters matches by score and province.
+/// Returns AsyncValue since allMatchesProvider is now a FutureProvider.
+final filteredMatchesProvider =
+    FutureProvider<List<MatchResult>>((ref) async {
+  final allMatchesAsync = ref.watch(allMatchesProvider);
   final filter = ref.watch(matchesFilterProvider);
 
-  return allMatches.where((m) {
-    switch (filter.scoreFilter) {
-      case ScoreFilter.excellent:
-        if (m.score < 0.85) return false;
-      case ScoreFilter.good:
-        if (m.score < 0.70 || m.score >= 0.85) return false;
-      case ScoreFilter.partial:
-        if (m.score >= 0.70) return false;
-      case ScoreFilter.all:
-        break;
-    }
-    if (filter.selectedProvince != null &&
-        m.offer.province != filter.selectedProvince) {
-      return false;
-    }
-    return true;
-  }).toList();
+  return allMatchesAsync.when(
+    data: (allMatches) {
+      return allMatches.where((m) {
+        switch (filter.scoreFilter) {
+          case ScoreFilter.excellent:
+            if (m.score < 0.85) return false;
+          case ScoreFilter.good:
+            if (m.score < 0.70 || m.score >= 0.85) return false;
+          case ScoreFilter.partial:
+            if (m.score >= 0.70) return false;
+          case ScoreFilter.all:
+            break;
+        }
+        if (filter.selectedProvince != null &&
+            m.offer.province != filter.selectedProvince) {
+          return false;
+        }
+        return true;
+      }).toList();
+    },
+    loading: () => [],
+    error: (_, __) => [],
+  );
 });
 
-final availableProvincesProvider = Provider<List<String>>((ref) {
-  final allMatches = ref.watch(allMatchesProvider);
-  return allMatches.map((m) => m.offer.province).toSet().toList()..sort();
+/// Extracts unique provinces from all matches.
+final availableProvincesProvider = FutureProvider<List<String>>((ref) async {
+  final allMatchesAsync = ref.watch(allMatchesProvider);
+
+  return allMatchesAsync.when(
+    data: (allMatches) {
+      return allMatches.map((m) => m.offer.province).toSet().toList()..sort();
+    },
+    loading: () => [],
+    error: (_, __) => [],
+  );
 });

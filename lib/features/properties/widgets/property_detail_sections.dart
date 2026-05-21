@@ -52,16 +52,20 @@ class _ImageGalleryState extends State<ImageGallery> {
           child: PageView.builder(
             itemCount: widget.images.length,
             onPageChanged: (i) => setState(() => _current = i),
-            itemBuilder: (context, index) => Image.file(
-              File(widget.images[index]),
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                color: AppTheme.bgRaised,
-                child: const Center(
-                  child: Icon(
-                    Icons.broken_image_rounded,
-                    size: 60,
-                    color: AppTheme.textLow,
+            itemBuilder: (context, index) => RepaintBoundary(
+              child: Image.file(
+                File(widget.images[index]),
+                fit: BoxFit.cover,
+                cacheWidth: 1200,
+                filterQuality: FilterQuality.low,
+                errorBuilder: (_, __, ___) => Container(
+                  color: AppTheme.bgRaised,
+                  child: const Center(
+                    child: Icon(
+                      Icons.broken_image_rounded,
+                      size: 60,
+                      color: AppTheme.textLow,
+                    ),
                   ),
                 ),
               ),

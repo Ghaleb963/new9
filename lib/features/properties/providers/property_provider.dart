@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/property_model.dart';
@@ -28,8 +29,6 @@ class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
     final inserted = property.copyWith(id: newId);
     state = [inserted, ...state];
 
-    // PDF generation is now lazy — only when user explicitly requests export.
-    // enqueueForBackgroundCache is a no-op on weak devices and respects queue limits.
     unawaited(_enqueueBackgroundPdf(inserted));
 
     return true;
@@ -80,86 +79,42 @@ final propertyProvider =
   return PropertyNotifier(ref);
 });
 
-final filteredPropertiesProvider = Provider<List<PropertyModel>>((ref) {
-  final allProperties = ref.watch(propertyProvider);
+// ════════════════════════════════════════════════════════
+// filteredPropertiesProvider — فلترة على مستوى SQL
+//
+// بدلاً من جلب كل العقارات ثم تصفيتها في Dart (O(n × 19))،
+// نبني جملة WHERE ديناميكياً ونترك SQLite يقوم بالعمل.
+// ════════════════════════════════════════════════════════
+final filteredPropertiesProvider = FutureProvider<List<PropertyModel>>((ref) {
   final filter = ref.watch(propertyFilterProvider);
 
-  if (filter.isEmpty) return allProperties;
+  if (filter.isEmpty) {
+    return DatabaseHelper.instance.getAllProperties();
+  }
 
-  return allProperties.where((p) {
-    final matchesEntryType = filter.selectedEntryType == null ||
-        p.entryType == filter.selectedEntryType;
-
-    final matchesQuery = filter.query.isEmpty ||
-        p.region.toLowerCase().contains(filter.query.toLowerCase()) ||
-        p.propertyType.toLowerCase().contains(filter.query.toLowerCase()) ||
-        p.province.toLowerCase().contains(filter.query.toLowerCase()) ||
-        p.addressDetails.toLowerCase().contains(filter.query.toLowerCase()) ||
-        p.ownerName.toLowerCase().contains(filter.query.toLowerCase()) ||
-        p.officeName.toLowerCase().contains(filter.query.toLowerCase());
-
-    final matchesMinPrice =
-        filter.minPrice == null || p.price >= filter.minPrice!;
-    final matchesMaxPrice =
-        filter.maxPrice == null || p.price <= filter.maxPrice!;
-    final matchesType =
-        filter.selectedType == null || p.propertyType == filter.selectedType;
-    final matchesOwner = filter.selectedOwnerStatus == null ||
-        p.ownerStatus == filter.selectedOwnerStatus;
-    final matchesProvince = filter.selectedProvince == null ||
-        p.province == filter.selectedProvince;
-    final matchesAdType =
-        filter.selectedAdType == null || p.adType == filter.selectedAdType;
-    final matchesStatus =
-        filter.selectedStatus == null || p.status == filter.selectedStatus;
-    final matchesFinishing = filter.selectedFinishing == null ||
-        p.finishingLevel == filter.selectedFinishing;
-    final matchesFacade =
-        filter.selectedFacade == null || p.facade == filter.selectedFacade;
-    final matchesDeedType = filter.selectedDeedType == null ||
-        p.deedType == filter.selectedDeedType;
-    final matchesMinRooms =
-        filter.minRooms == null || p.rooms >= filter.minRooms!;
-    final matchesMaxRooms =
-        filter.maxRooms == null || p.rooms <= filter.maxRooms!;
-    final matchesMinArea =
-        filter.minArea == null || p.area >= filter.minArea!;
-    final matchesMaxArea =
-        filter.maxArea == null || p.area <= filter.maxArea!;
-    final matchesFloor = filter.selectedFloor == null ||
-        filter.selectedFloor!.isEmpty ||
-        p.floor.toLowerCase().contains(filter.selectedFloor!.toLowerCase());
-    final matchesHasGarden =
-        filter.hasGarden == null || p.hasGarden == filter.hasGarden;
-    final matchesIsDuplex =
-        filter.isDuplex == null || p.isDuplex == filter.isDuplex;
-    final matchesCurrency = filter.selectedCurrency == null ||
-        p.currency == filter.selectedCurrency;
-    final matchesOwnership = filter.selectedOwnership == null ||
-        p.ownershipType == filter.selectedOwnership;
-
-    return matchesEntryType &&
-        matchesQuery &&
-        matchesMinPrice &&
-        matchesMaxPrice &&
-        matchesType &&
-        matchesOwner &&
-        matchesProvince &&
-        matchesAdType &&
-        matchesStatus &&
-        matchesFinishing &&
-        matchesFacade &&
-        matchesDeedType &&
-        matchesMinRooms &&
-        matchesMaxRooms &&
-        matchesMinArea &&
-        matchesMaxArea &&
-        matchesFloor &&
-        matchesHasGarden &&
-        matchesIsDuplex &&
-        matchesCurrency &&
-        matchesOwnership;
-  }).toList();
+  return DatabaseHelper.instance.getPropertiesFiltered(
+    entryType: filter.selectedEntryType?.name,
+    query: filter.query.isNotEmpty ? filter.query : null,
+    minPrice: filter.minPrice,
+    maxPrice: filter.maxPrice,
+    propertyType: filter.selectedType,
+    province: filter.selectedProvince,
+    adType: filter.selectedAdType,
+    status: filter.selectedStatus,
+    finishingLevel: filter.selectedFinishing,
+    facade: filter.selectedFacade,
+    deedType: filter.selectedDeedType,
+    minRooms: filter.minRooms,
+    maxRooms: filter.maxRooms,
+    minArea: filter.minArea,
+    maxArea: filter.maxArea,
+    floor: filter.selectedFloor,
+    hasGarden: filter.hasGarden,
+    isDuplex: filter.isDuplex,
+    currency: filter.selectedCurrency,
+    ownershipType: filter.selectedOwnership,
+    ownerStatus: filter.selectedOwnerStatus,
+  );
 });
 
 class PropertyFilter {
@@ -304,15 +259,130 @@ final propertyFilterProvider =
     StateProvider<PropertyFilter>((ref) => const PropertyFilter());
 
 // ════════════════════════════════════════════════════════
-// allMatchesProvider — Provider تفاعلي لجميع التوافقات
+// allMatchesProvider — يعمل على Isolate منفصل
 //
-// يراقب propertyProvider ويُعيد حساب التوافقات تلقائياً
-// في كل مرة تتغير قائمة العقارات (إضافة/تعديل/حذف).
+// بدلاً من حساب O(offers × requirements) على الخيط الرئيسي
+// (مسبب تجميد الواجهة 2-3 ثوانٍ)، نستخدم Isolate.run()
+// لنقل الحساب الثقيل إلى خلفية بدون فقدان أي إطار.
 // ════════════════════════════════════════════════════════
-final allMatchesProvider = Provider<List<MatchResult>>((ref) {
+final allMatchesProvider =
+    FutureProvider<List<MatchResult>>((ref) async {
   final allProperties = ref.watch(propertyProvider);
-  return MatchingService.findAllMatches(allProperties);
+
+  if (allProperties.isEmpty) return [];
+
+  final offers = allProperties
+      .where((p) => p.entryType == EntryType.offer)
+      .toList();
+  final requirements = allProperties
+      .where((p) => p.entryType == EntryType.requirement)
+      .toList();
+
+  if (offers.isEmpty || requirements.isEmpty) return [];
+
+  // Offload O(offers × requirements) to background isolate
+  final results = await Isolate.run<List<Map<String, dynamic>>>(() {
+    return _computeAllMatches(offers, requirements);
+  });
+
+  return results
+      .map((m) => MatchResult(
+            offer: PropertyModel.fromMap(m['offer'] as Map<String, dynamic>),
+            requirement:
+                PropertyModel.fromMap(m['requirement'] as Map<String, dynamic>),
+            score: m['score'] as double,
+            matchedCriteria:
+                (m['matchedCriteria'] as List).cast<String>(),
+          ))
+      .toList();
 });
+
+/// Top-level function for isolate execution.
+/// Pure Dart — no Flutter dependencies.
+/// Converts PropertyModel to Map for SendPort serialization.
+List<Map<String, dynamic>> _computeAllMatches(
+  List<PropertyModel> offers,
+  List<PropertyModel> requirements,
+) {
+  final results = <Map<String, dynamic>>[];
+
+  for (final offer in offers) {
+    for (final req in requirements) {
+      final result = _evaluateIsolated(offer, req);
+      if (result != null) results.add(result);
+    }
+  }
+
+  results.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
+  return results;
+}
+
+/// Isolated match evaluation — pure computation, no Flutter dependencies.
+Map<String, dynamic>? _evaluateIsolated(
+  PropertyModel offer,
+  PropertyModel requirement,
+) {
+  const double priceTolerance = 0.20;
+  const double minimumScore = 0.60;
+
+  // Hard Criteria
+  if (offer.province.isEmpty ||
+      requirement.province.isEmpty ||
+      offer.province != requirement.province) {
+    return null;
+  }
+  if (offer.propertyType.isEmpty ||
+      requirement.propertyType.isEmpty ||
+      offer.propertyType != requirement.propertyType) {
+    return null;
+  }
+  if (offer.adType.isEmpty ||
+      requirement.adType.isEmpty ||
+      offer.adType != requirement.adType) {
+    return null;
+  }
+
+  // Soft Criteria
+  double score = 0.60;
+  final matched = <String>['المحافظة', 'نوع العقار', 'نوع الإعلان'];
+
+  if (offer.price > 0 && requirement.price > 0) {
+    final maxAcceptable = requirement.price * (1 + priceTolerance);
+    if (offer.price <= maxAcceptable) {
+      score += 0.20;
+      matched.add('السعر ضمن الميزانية');
+    } else if (offer.price > maxAcceptable * 1.5) {
+      score -= 0.05;
+    }
+  } else {
+    score += 0.10;
+  }
+
+  if (offer.region.isNotEmpty && requirement.region.isNotEmpty) {
+    if (offer.region.trim().toLowerCase() ==
+        requirement.region.trim().toLowerCase()) {
+      score += 0.15;
+      matched.add('المنطقة');
+    }
+  }
+
+  if (offer.rooms > 0 && requirement.rooms > 0) {
+    if ((offer.rooms - requirement.rooms).abs() <= 1) {
+      score += 0.05;
+      matched.add('عدد الغرف');
+    }
+  }
+
+  final finalScore = score.clamp(0.0, 1.0);
+  if (finalScore < minimumScore) return null;
+
+  return {
+    'offer': offer.toMap(),
+    'requirement': requirement.toMap(),
+    'score': finalScore,
+    'matchedCriteria': matched,
+  };
+}
 
 class PropertyStats {
   final int total;

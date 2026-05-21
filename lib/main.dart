@@ -67,8 +67,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final matchCount =
-        ref.watch(allMatchesProvider.select((m) => m.length));
+    final matchCountAsync = ref.watch(allMatchesProvider);
+    final matchCount = matchCountAsync.value?.length ?? 0;
 
     return Scaffold(
       body: IndexedStack(
@@ -80,7 +80,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
         onTap: (index) => setState(() => _selectedIndex = index),
         selectedItemColor: AppTheme.emeraldGreen,
         unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed, // ضروري عند 4 تبويبات+
+        type: BottomNavigationBarType.fixed,
         items: [
           const BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
@@ -92,7 +92,6 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             activeIcon: Icon(Icons.add_box),
             label: 'إضافة',
           ),
-          // التبويب الجديد مع badge يعرض عدد التوافقات
           BottomNavigationBarItem(
             icon: _MatchesBadgeIcon(
               count: matchCount,

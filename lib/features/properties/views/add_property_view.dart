@@ -1,7 +1,9 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/property_model.dart';
@@ -14,6 +16,45 @@ import '../../../core/widgets/app_image_widgets.dart';
 import '../../../core/widgets/match_notification_overlay.dart';
 import '../widgets/add_property_widgets.dart';
 
+// ════════════════════════════════════════════════════════
+// ISOLATE ENTRY POINT — Image file saving off main thread
+// ════════════════════════════════════════════════════════
+
+/// Input data for isolate-based image saving.
+/// All fields are serializable across isolate boundaries.
+class _SaveMediaInput {
+  final String mediaDirPath;
+  final List<String> existingImagePaths;
+  final List<String> newFilePaths;
+
+  _SaveMediaInput({
+    required this.mediaDirPath,
+    required this.existingImagePaths,
+    required this.newFilePaths,
+  });
+}
+
+/// Saves images to disk inside an isolate.
+/// Performs file I/O off the main thread to prevent frame drops.
+Future<List<String>> _saveMediaInIsolate(_SaveMediaInput input) async {
+  final mediaDir = Directory(input.mediaDirPath);
+  if (!await mediaDir.exists()) {
+    await mediaDir.create(recursive: true);
+  }
+
+  final savedPaths = List<String>.from(input.existingImagePaths);
+  for (final filePath in input.newFilePaths) {
+    final sourceFile = File(filePath);
+    if (!await sourceFile.exists()) continue;
+
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_${path.basename(filePath)}';
+    final savedFile = await sourceFile.copy('${mediaDir.path}/$fileName');
+    savedPaths.add(savedFile.path);
+  }
+  return savedPaths;
+}
+
 class AddPropertyView extends ConsumerStatefulWidget {
   final PropertyModel? existingProperty;
   const AddPropertyView({super.key, this.existingProperty});
@@ -25,10 +66,8 @@ class AddPropertyView extends ConsumerStatefulWidget {
 class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
   final _formKey = GlobalKey<FormState>();
 
-  // [جديد] التصنيف الجذري — يتحكم في الحقول المعروضة بالكامل
   late EntryType entryType;
 
-  // حقول مشتركة بين العرض والطلب
   late String adType;
   late String propertyType;
   late String province;
@@ -39,7 +78,6 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
   late String currency;
   final notesController = TextEditingController();
 
-  // حقول خاصة بـ "عرض عقار"
   late String deedType;
   final addressController = TextEditingController();
   final floorController = TextEditingController();
@@ -61,12 +99,6 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
   final fbLinkController = TextEditingController();
   List<File> images = [];
   List<String> existingImagePaths = [];
-
-  // حقول خاصة بـ "طلب عقار"
-  // يُعاد استخدام ownerName → اسم الباحث
-  // يُعاد استخدام contactPhone → هاتف الباحث
-  // يُعاد استخدام ownerWhatsapp → واتساب الباحث
-  // يُعاد استخدام price → الميزانية القصوى
 
   bool _isSaving = false;
   final ImagePicker _picker = ImagePicker();
@@ -139,21 +171,18 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
     }
   }
 
+  /// Saves images to disk using Isolate.run() — zero main-thread blocking.
   Future<List<String>> _saveMediaLocally() async {
     final appDir = await getApplicationDocumentsDirectory();
-    final mediaDir = Directory('${appDir.path}/property_images');
-    if (!await mediaDir.exists()) {
-      await mediaDir.create(recursive: true);
-    }
+    final mediaDirPath = '${appDir.path}/property_images';
 
-    List<String> savedPaths = List<String>.from(existingImagePaths);
-    for (var file in images) {
-      final fileName =
-          '${DateTime.now().millisecondsSinceEpoch}_${path.basename(file.path)}';
-      final savedFile = await file.copy('${mediaDir.path}/$fileName');
-      savedPaths.add(savedFile.path);
-    }
-    return savedPaths;
+    final input = _SaveMediaInput(
+      mediaDirPath: mediaDirPath,
+      existingImagePaths: List<String>.from(existingImagePaths),
+      newFilePaths: images.map((f) => f.path).toList(),
+    );
+
+    return Isolate.run<List<String>>(() => _saveMediaInIsolate(input));
   }
 
   void _resetForm() {
@@ -201,14 +230,12 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      // للطلبات: لا حاجة لحفظ صور، نُمرر قائمة فارغة
       final savedImages = isOffer ? await _saveMediaLocally() : [];
 
       final property = PropertyModel(
         id: widget.existingProperty?.id,
         entryType: entryType,
         adType: adType,
-        // للطلبات: نضع قيمة محايدة للحقول غير المعبأة — لا نتركها null
         deedType: isOffer ? deedType : '',
         propertyType: propertyType,
         province: province,
@@ -229,10 +256,8 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
         price: double.tryParse(priceController.text) ?? 0,
         currency: currency,
         status: isOffer ? status : '',
-        ownerName:
-            ownerNameController.text, // عرض: اسم المالك | طلب: اسم الباحث
-        ownerWhatsapp: ownerWhatsappController
-            .text, // عرض: واتساب المالك | طلب: واتساب الباحث
+        ownerName: ownerNameController.text,
+        ownerWhatsapp: ownerWhatsappController.text,
         officeName: isOffer ? officeNameController.text : '',
         contactPhone: contactPhoneController.text,
         facebookLink: isOffer ? fbLinkController.text : '',
@@ -255,7 +280,6 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
         messenger
             .showSnackBar(const SnackBar(content: Text('تمت الإضافة بنجاح')));
 
-        // ── نظام المطابقة الفورية ──────────────────────────────
         final matches = ref.read(propertyProvider.notifier).findMatchesFor(property);
 
         if (matches != null && matches.isNotEmpty && mounted) {
@@ -299,25 +323,16 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
         child: ListView(
           padding: const EdgeInsets.all(AppTheme.sp16),
           children: [
-            // ══════════════════════════════════════════════════
-            // [جديد] Selector نوع الإدخال — أول شيء يراه المستخدم
-            // التصميم: بطاقتان كبيرتان Minimalist مع أيقونة ووصف واضح
-            // ══════════════════════════════════════════════════
             EntryTypeSelector(
               selected: entryType,
               onChanged: (type) => setState(() {
                 entryType = type;
-                // إعادة تعيين الحقول غير المشتركة عند التبديل لتجنب
-                // تسرب بيانات نوع واحد إلى بيانات النوع الآخر
                 status = 'متاح';
                 deedType = 'سكني';
               }),
             ),
             const SizedBox(height: AppTheme.sp8),
 
-            // ══════════════════════════════════════════════════
-            // حقول مشتركة بين العرض والطلب
-            // ══════════════════════════════════════════════════
             AppFormSection(
               title: isOffer ? 'نوع الإعلان' : 'نوع الطلب',
               children: [
@@ -379,10 +394,6 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
               ],
             ),
 
-            // ══════════════════════════════════════════════════
-            // حقول خاصة بـ "عرض عقار" فقط
-            // يتم إخفاؤها للطلبات لأنها غير ذات صلة بالباحث
-            // ══════════════════════════════════════════════════
             if (isOffer) ...[
               AppFormSection(title: 'نوع السند', children: [
                 AppSmartButtons(
@@ -466,9 +477,6 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
               ]),
             ],
 
-            // ══════════════════════════════════════════════════
-            // معلومات الاتصال — المسميات تختلف بين العرض والطلب
-            // ══════════════════════════════════════════════════
             AppFormSection(
               title: isOffer ? 'معلومات المالك (خاصة)' : 'معلومات الباحث',
               children: [
@@ -499,9 +507,6 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
                   maxLines: 3),
             ]),
 
-            // ══════════════════════════════════════════════════
-            // الوسائط — خاصة بالعروض فقط
-            // ══════════════════════════════════════════════════
             if (isOffer)
               AppFormSection(title: 'الوسائط', children: [
                 ElevatedButton.icon(
@@ -562,9 +567,3 @@ class _AddPropertyViewState extends ConsumerState<AddPropertyView> {
     );
   }
 }
-
-// ══════════════════════════════════════════════════
-// Widget مستقل لـ Selector نوع الإدخال.
-// فصله في Widget خاص يحترم مبدأ Single Responsibility
-// ويجعله قابلاً لإعادة الاستخدام أو التعديل دون المساس بالـ Form.
-
