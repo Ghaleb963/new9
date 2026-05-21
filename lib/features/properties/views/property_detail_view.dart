@@ -1,8 +1,7 @@
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:printing/printing.dart';
 import '../models/property_model.dart';
 import '../providers/property_provider.dart';
 import '../services/pdf_service.dart';
@@ -35,29 +34,41 @@ class _PropertyDetailViewState extends ConsumerState<PropertyDetailView> {
   Future<void> _generateAndSharePdf() async {
     if (!mounted) return;
 
-    final bytes = await showDialog<Uint8List>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => PdfExportDialog(
-        imageCount: _property.images.length,
-        generate: (onProgress) => PdfService.getCachedPdf(
-          property: _property,
-          settings: ref.read(settingsProvider),
-          onProgress: onProgress,
+    try {
+      final bytes = await showDialog<Uint8List>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PdfExportDialog(
+          imageCount: _property.images.length,
+          generate: (onProgress) => PdfService.getCachedPdf(
+            property: _property,
+            settings: ref.read(settingsProvider),
+            onProgress: onProgress,
+          ),
         ),
-      ),
-    );
+      );
 
-    if (bytes == null || !mounted) return;
+      if (bytes == null || !mounted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('فشل إنشاء الملف')),
+          );
+        }
+        return;
+      }
 
-    final fileName = '${_isOffer ? "Property" : "Request"}_${_property.id}.pdf';
-    final file = File('${Directory.systemTemp.path}/$fileName');
-    await file.writeAsBytes(bytes);
-
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      subject: _isOffer ? 'تقرير العقار' : 'تقرير الطلب',
-    );
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: '${_isOffer ? "Property" : "Request"}_${_property.id}.pdf',
+      );
+    } catch (e) {
+      debugPrint('_generateAndSharePdf error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('حدث خطأ أثناء إنشاء الملف')),
+        );
+      }
+    }
   }
 
   Future<void> _confirmDelete() async {

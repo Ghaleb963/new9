@@ -11,22 +11,8 @@ import '../models/property_model.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../settings/providers/settings_provider.dart';
 
-bool _isJpeg(Uint8List bytes) {
-  return bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
-}
-
 Uint8List? _processImageBytes(Uint8List rawBytes) {
   try {
-    if (rawBytes.length < 4) return null;
-
-    if (_isJpeg(rawBytes)) {
-      final decoder = img.JpegDecoder();
-      final info = decoder.startDecode(rawBytes);
-      if (info != null && info.width <= 1000) {
-        return rawBytes;
-      }
-    }
-
     final image = img.decodeImage(rawBytes);
     if (image == null) return null;
 
@@ -42,7 +28,11 @@ Uint8List? _processImageBytes(Uint8List rawBytes) {
 }
 
 String _ar(String text) {
-  return ArabicReshaper.instance.reshape(text);
+  try {
+    return ArabicReshaper.instance.reshape(text);
+  } catch (_) {
+    return text;
+  }
 }
 
 pw.Widget _row(String title, String value) {
@@ -189,17 +179,39 @@ class PdfService {
     required SettingsState settings,
     void Function(int completed, int total)? onProgress,
   }) async {
-    final (arabicFont, arabicBoldFont) = await _loadFonts();
-    return _generate(property, settings, arabicFont, arabicBoldFont, onProgress: onProgress);
+    try {
+      final (arabicFont, arabicBoldFont) = await _loadFonts();
+      return await _generate(property, settings, arabicFont, arabicBoldFont, onProgress: onProgress);
+    } catch (e, stack) {
+      debugPrint('PdfService: generatePropertyPdf failed: $e\n$stack');
+      final (arabicFont, arabicBoldFont) = await _loadFonts();
+      final emergency = pw.Document();
+      emergency.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
+          build: (_) => pw.Center(
+            child: pw.Text(
+              '${_ar(property.propertyType)}\n${property.province}\n${_ar('تقرير عقار')}',
+              style: pw.TextStyle(font: arabicBoldFont, fontSize: 18),
+            ),
+          ),
+        ),
+      );
+      return emergency.save();
+    }
   }
 
   static Future<void> generateAndCachePdf({
     required PropertyModel property,
     required SettingsState settings,
   }) async {
-    final (arabicFont, arabicBoldFont) = await _loadFonts();
-    final bytes = await _generate(property, settings, arabicFont, arabicBoldFont);
-    await _saveToCache(property.id, bytes);
+    try {
+      final bytes = await generatePropertyPdf(property: property, settings: settings);
+      await _saveToCache(property.id, bytes);
+    } catch (e) {
+      debugPrint('PdfService: generateAndCachePdf failed: $e');
+    }
   }
 
   static Future<void> _saveToCache(int? propertyId, Uint8List bytes) async {
@@ -227,10 +239,18 @@ class PdfService {
       _cachedFont = pw.Font.ttf(regular.buffer.asByteData());
       _cachedBoldFont = pw.Font.ttf(bold.buffer.asByteData());
       return (_cachedFont!, _cachedBoldFont!);
-    } catch (_) {
-      _cachedFont = await PdfGoogleFonts.notoSansArabicRegular();
-      _cachedBoldFont = await PdfGoogleFonts.notoSansArabicBold();
-      return (_cachedFont!, _cachedBoldFont!);
+    } catch (e) {
+      debugPrint('PdfService: Cairo font error: $e, trying Google Fonts');
+      try {
+        _cachedFont = await PdfGoogleFonts.notoSansArabicRegular();
+        _cachedBoldFont = await PdfGoogleFonts.notoSansArabicBold();
+        return (_cachedFont!, _cachedBoldFont!);
+      } catch (e2) {
+        debugPrint('PdfService: Google Fonts error: $e2, using built-in fallback');
+        _cachedFont = pw.Font.helvetica();
+        _cachedBoldFont = pw.Font.helveticaBold();
+        return (_cachedFont!, _cachedBoldFont!);
+      }
     }
   }
 
@@ -242,51 +262,82 @@ class PdfService {
     void Function(int completed, int total)? onProgress,
   }) async {
     final isOffer = property.entryType == EntryType.offer;
-    final pdf = pw.Document(
-      title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
-      author: settings.officeName.isNotEmpty ? settings.officeName : 'Real Estate App',
-      subject: '${property.propertyType} - ${property.province}',
-    );
-
     final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
     final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
 
-    final imageWidgets = <pw.Widget>[];
-    if (property.images.isNotEmpty) {
-      final results = await _processImagesConcurrently(
-        property.images,
-        onProgress: onProgress,
+    try {
+      final pdf = pw.Document(
+        title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
+        author: settings.officeName.isNotEmpty ? settings.officeName : 'Real Estate App',
+        subject: '${property.propertyType} - ${property.province}',
       );
-      for (final processed in results) {
-        if (processed != null) {
-          imageWidgets.add(_buildImageWidget(processed));
+
+      final imageWidgets = <pw.Widget>[];
+      if (property.images.isNotEmpty) {
+        final results = await _processImagesConcurrently(
+          property.images,
+          onProgress: onProgress,
+        );
+        for (final processed in results) {
+          if (processed != null) {
+            imageWidgets.add(_buildImageWidget(processed));
+          }
         }
       }
-      results.clear();
+
+      await Future.delayed(Duration.zero);
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
+          build: (_) => [
+            _buildPdfContent(
+              imageWidgets,
+              property,
+              settings.officeName,
+              settings.officePhone,
+              isOffer,
+              arabicBoldFont,
+              entryPdfColor,
+              dividerColor,
+            ),
+          ],
+        ),
+      );
+
+      return pdf.save();
+    } catch (e, stack) {
+      debugPrint('PdfService: _generate failed with images: $e\n$stack');
+
+      final fallbackPdf = pw.Document(
+        title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
+        author: settings.officeName.isNotEmpty ? settings.officeName : 'Real Estate App',
+        subject: '${property.propertyType} - ${property.province}',
+      );
+
+      fallbackPdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
+          build: (_) => [
+            _buildPdfContent(
+              [],
+              property,
+              settings.officeName,
+              settings.officePhone,
+              isOffer,
+              arabicBoldFont,
+              entryPdfColor,
+              dividerColor,
+            ),
+          ],
+        ),
+      );
+
+      debugPrint('PdfService: trying fallback without images');
+      return fallbackPdf.save();
     }
-
-    await Future.delayed(Duration.zero);
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
-        build: (_) => [
-          _buildPdfContent(
-            imageWidgets,
-            property,
-            settings.officeName,
-            settings.officePhone,
-            isOffer,
-            arabicBoldFont,
-            entryPdfColor,
-            dividerColor,
-          ),
-        ],
-      ),
-    );
-
-    return pdf.save();
   }
 
   // ─── PDF Cache ─────────────────────────────────────────────────────────
@@ -348,29 +399,19 @@ class PdfService {
     if (paths.isEmpty) return [];
 
     final results = List<Uint8List?>.filled(paths.length, null);
-    int nextIndex = 0;
     int completed = 0;
-    const maxConcurrent = 1;
 
-    Future<void> worker() async {
-      while (true) {
-        final index = nextIndex++;
-        if (index >= paths.length) return;
-
-        try {
-          final bytes = await File(paths[index]).readAsBytes();
-          results[index] = await compute(_processImageBytes, bytes);
-        } catch (e) {
-          debugPrint('PdfService: failed image $index: $e');
-        }
-
-        completed++;
-        onProgress?.call(completed, paths.length);
+    for (int i = 0; i < paths.length; i++) {
+      try {
+        final bytes = await File(paths[i]).readAsBytes();
+        results[i] = _processImageBytes(bytes);
+      } catch (e) {
+        debugPrint('PdfService: failed image $i: $e');
       }
-    }
 
-    final count = maxConcurrent < paths.length ? maxConcurrent : paths.length;
-    await Future.wait(List.generate(count, (_) => worker()));
+      completed++;
+      onProgress?.call(completed, paths.length);
+    }
 
     return results;
   }
