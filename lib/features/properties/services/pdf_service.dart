@@ -17,8 +17,8 @@ Uint8List? _processImageBytes(Uint8List rawBytes) {
     if (image == null) return null;
 
     img.Image resized = image;
-    if (image.width > 1000) {
-      resized = img.copyResize(image, width: 1000);
+    if (image.width > 800) {
+      resized = img.copyResize(image, width: 800);
     }
 
     return Uint8List.fromList(img.encodeJpg(resized, quality: 75));
@@ -446,7 +446,7 @@ class PdfService {
         child: pw.Image(
           pw.MemoryImage(processed),
           fit: pw.BoxFit.contain,
-          width: 450,
+          width: 400,
         ),
       ),
     );
