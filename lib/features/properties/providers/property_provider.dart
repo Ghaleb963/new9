@@ -1,9 +1,12 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/property_model.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/constants/app_constants.dart';
 import '../services/matching_service.dart';
 import '../services/pdf_service.dart';
+import '../../settings/providers/settings_provider.dart';
 
 class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
   final Ref ref;
@@ -24,7 +27,22 @@ class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
     final newId = await DatabaseHelper.instance.insertProperty(property);
     final inserted = property.copyWith(id: newId);
     state = [inserted, ...state];
+
+    unawaited(_backgroundGeneratePdf(inserted));
+
     return true;
+  }
+
+  Future<void> _backgroundGeneratePdf(PropertyModel property) async {
+    try {
+      final settings = ref.read(settingsProvider);
+      await PdfService.generateAndCachePdf(
+        property: property,
+        settings: settings,
+      );
+    } catch (e) {
+      debugPrint('PropertyNotifier: background PDF failed: $e');
+    }
   }
 
   Future<void> deleteProperty(int id) async {

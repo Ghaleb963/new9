@@ -250,6 +250,7 @@ class DatabaseHelper {
   }
 
   Future<void> closeDatabase() async {
+    _initFuture = null;
     if (_database != null) {
       await _database!.close();
       _database = null;

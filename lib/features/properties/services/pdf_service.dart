@@ -187,7 +187,7 @@ pw.Widget _buildPdfContent(
 class PdfService {
   static pw.Font? _cachedFont;
   static pw.Font? _cachedBoldFont;
-  static const int _imageBatchSize = 3;
+  static const int _defaultBatchSize = 3;
 
   static Future<Uint8List> generatePropertyPdf({
     required PropertyModel property,
@@ -195,6 +195,28 @@ class PdfService {
   }) async {
     final (arabicFont, arabicBoldFont) = await _loadFonts();
     return _generate(property, settings, arabicFont, arabicBoldFont);
+  }
+
+  /// Generates and caches a PDF in the background with sequential image
+  /// processing (batch size = 1) to minimise CPU/memory spikes.
+  static Future<void> generateAndCachePdf({
+    required PropertyModel property,
+    required SettingsState settings,
+  }) async {
+    final (arabicFont, arabicBoldFont) = await _loadFonts();
+    final bytes =
+        await _generate(property, settings, arabicFont, arabicBoldFont, batchSize: 1);
+    await _saveToCache(property.id, bytes);
+  }
+
+  static Future<void> _saveToCache(int? propertyId, Uint8List bytes) async {
+    if (propertyId == null) return;
+    try {
+      final dir = await _getCacheDir();
+      await File('${dir.path}/${_cacheFileName(propertyId)}').writeAsBytes(bytes);
+    } catch (e) {
+      debugPrint('PdfService: failed to save background cache: $e');
+    }
   }
 
   static Future<(pw.Font, pw.Font)> _loadFonts() async {
@@ -223,8 +245,9 @@ class PdfService {
     PropertyModel property,
     SettingsState settings,
     pw.Font arabicFont,
-    pw.Font arabicBoldFont,
-  ) async {
+    pw.Font arabicBoldFont, {
+    int batchSize = _defaultBatchSize,
+  }) async {
     final isOffer = property.entryType == EntryType.offer;
     final pdf = pw.Document(
       title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
@@ -241,8 +264,8 @@ class PdfService {
         property.images.map((path) => File(path).readAsBytes()),
       );
 
-      for (var i = 0; i < allBytes.length; i += _imageBatchSize) {
-        final end = (i + _imageBatchSize).clamp(0, allBytes.length);
+      for (var i = 0; i < allBytes.length; i += batchSize) {
+        final end = (i + batchSize).clamp(0, allBytes.length);
         final batch = allBytes.sublist(i, end);
         final batchResults = await compute(_processAllImages, batch);
         for (final processed in batchResults) {
