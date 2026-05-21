@@ -54,7 +54,10 @@ class _PdfExportDialogState extends State<PdfExportDialog>
           _total = total;
           _building = done >= total;
         });
-      });
+      }).timeout(
+        const Duration(seconds: 45),
+        onTimeout: () => throw TimeoutException('PDF generation timeout'),
+      );
       if (mounted) Navigator.pop(context, bytes);
     } catch (_) {
       if (mounted) Navigator.pop(context, null);
