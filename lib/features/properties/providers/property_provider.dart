@@ -28,20 +28,22 @@ class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
     final inserted = property.copyWith(id: newId);
     state = [inserted, ...state];
 
-    unawaited(_backgroundGeneratePdf(inserted));
+    // PDF generation is now lazy — only when user explicitly requests export.
+    // enqueueForBackgroundCache is a no-op on weak devices and respects queue limits.
+    unawaited(_enqueueBackgroundPdf(inserted));
 
     return true;
   }
 
-  Future<void> _backgroundGeneratePdf(PropertyModel property) async {
+  Future<void> _enqueueBackgroundPdf(PropertyModel property) async {
     try {
       final settings = ref.read(settingsProvider);
-      await PdfService.generateAndCachePdf(
+      await PdfService.enqueueForBackgroundCache(
         property: property,
         settings: settings,
       );
     } catch (e) {
-      debugPrint('PropertyNotifier: background PDF failed: $e');
+      debugPrint('PropertyNotifier: enqueue background PDF failed: $e');
     }
   }
 
