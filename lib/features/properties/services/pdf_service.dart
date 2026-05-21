@@ -41,10 +41,6 @@ Uint8List? _processImageBytes(Uint8List rawBytes) {
   }
 }
 
-List<Uint8List?> _processAllImages(List<Uint8List> allBytes) {
-  return allBytes.map((b) => _processImageBytes(b)).toList();
-}
-
 String _ar(String text) {
   return ArabicReshaper.instance.reshape(text);
 }
@@ -187,25 +183,22 @@ pw.Widget _buildPdfContent(
 class PdfService {
   static pw.Font? _cachedFont;
   static pw.Font? _cachedBoldFont;
-  static const int _defaultBatchSize = 3;
 
   static Future<Uint8List> generatePropertyPdf({
     required PropertyModel property,
     required SettingsState settings,
+    void Function(int completed, int total)? onProgress,
   }) async {
     final (arabicFont, arabicBoldFont) = await _loadFonts();
-    return _generate(property, settings, arabicFont, arabicBoldFont);
+    return _generate(property, settings, arabicFont, arabicBoldFont, onProgress: onProgress);
   }
 
-  /// Generates and caches a PDF in the background with sequential image
-  /// processing (batch size = 1) to minimise CPU/memory spikes.
   static Future<void> generateAndCachePdf({
     required PropertyModel property,
     required SettingsState settings,
   }) async {
     final (arabicFont, arabicBoldFont) = await _loadFonts();
-    final bytes =
-        await _generate(property, settings, arabicFont, arabicBoldFont, batchSize: 1);
+    final bytes = await _generate(property, settings, arabicFont, arabicBoldFont);
     await _saveToCache(property.id, bytes);
   }
 
@@ -246,7 +239,7 @@ class PdfService {
     SettingsState settings,
     pw.Font arabicFont,
     pw.Font arabicBoldFont, {
-    int batchSize = _defaultBatchSize,
+    void Function(int completed, int total)? onProgress,
   }) async {
     final isOffer = property.entryType == EntryType.offer;
     final pdf = pw.Document(
@@ -260,33 +253,13 @@ class PdfService {
 
     final imageWidgets = <pw.Widget>[];
     if (property.images.isNotEmpty) {
-      final pendingBatch = <Uint8List>[];
-
-      for (final imagePath in property.images) {
-        try {
-          pendingBatch.add(await File(imagePath).readAsBytes());
-        } catch (e) {
-          debugPrint('PdfService: failed to read $imagePath: $e');
-          continue;
-        }
-
-        if (pendingBatch.length >= batchSize) {
-          final results = await compute(_processAllImages, pendingBatch);
-          for (final processed in results) {
-            if (processed != null) {
-              imageWidgets.add(_buildImageWidget(processed));
-            }
-          }
-          pendingBatch.clear();
-        }
-      }
-
-      if (pendingBatch.isNotEmpty) {
-        final results = await compute(_processAllImages, pendingBatch);
-        for (final processed in results) {
-          if (processed != null) {
-            imageWidgets.add(_buildImageWidget(processed));
-          }
+      final results = await _processImagesConcurrently(
+        property.images,
+        onProgress: onProgress,
+      );
+      for (final processed in results) {
+        if (processed != null) {
+          imageWidgets.add(_buildImageWidget(processed));
         }
       }
     }
@@ -331,6 +304,7 @@ class PdfService {
   static Future<Uint8List> getCachedPdf({
     required PropertyModel property,
     required SettingsState settings,
+    void Function(int completed, int total)? onProgress,
   }) async {
     final id = property.id;
     if (id == null) {
@@ -349,8 +323,11 @@ class PdfService {
       }
     }
 
-    final bytes =
-        await generatePropertyPdf(property: property, settings: settings);
+    final bytes = await generatePropertyPdf(
+      property: property,
+      settings: settings,
+      onProgress: onProgress,
+    );
 
     try {
       await file.writeAsBytes(bytes);
@@ -359,6 +336,40 @@ class PdfService {
     }
 
     return bytes;
+  }
+
+  static Future<List<Uint8List?>> _processImagesConcurrently(
+    List<String> paths, {
+    void Function(int completed, int total)? onProgress,
+  }) async {
+    if (paths.isEmpty) return [];
+
+    final results = List<Uint8List?>.filled(paths.length, null);
+    int nextIndex = 0;
+    int completed = 0;
+    const maxConcurrent = 2;
+
+    Future<void> worker() async {
+      while (true) {
+        final index = nextIndex++;
+        if (index >= paths.length) return;
+
+        try {
+          final bytes = await File(paths[index]).readAsBytes();
+          results[index] = await compute(_processImageBytes, bytes);
+        } catch (e) {
+          debugPrint('PdfService: failed image $index: $e');
+        }
+
+        completed++;
+        onProgress?.call(completed, paths.length);
+      }
+    }
+
+    final count = maxConcurrent < paths.length ? maxConcurrent : paths.length;
+    await Future.wait(List.generate(count, (_) => worker()));
+
+    return results;
   }
 
   /// Deletes cached PDF for a specific property.

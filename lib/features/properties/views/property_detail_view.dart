@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/property_model.dart';
@@ -9,8 +10,8 @@ import '../../settings/providers/settings_provider.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/status_helpers.dart';
-import '../../../core/widgets/app_loading_dialog.dart';
 import '../widgets/property_detail_sections.dart';
+import '../widgets/pdf_export_dialog.dart';
 
 class PropertyDetailView extends ConsumerStatefulWidget {
   final PropertyModel property;
@@ -31,16 +32,22 @@ class _PropertyDetailViewState extends ConsumerState<PropertyDetailView> {
   }
 
   Future<void> _generateAndSharePdf() async {
-    final settings = ref.read(settingsProvider);
     if (!mounted) return;
-    showAppLoadingDialog(context, message: 'جاري إنشاء PDF...');
 
-    final bytes = await PdfService.getCachedPdf(
-      property: _property,
-      settings: settings,
+    final bytes = await showDialog<Uint8List>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PdfExportDialog(
+        imageCount: _property.images.length,
+        generate: (onProgress) => PdfService.getCachedPdf(
+          property: _property,
+          settings: ref.read(settingsProvider),
+          onProgress: onProgress,
+        ),
+      ),
     );
 
-    if (mounted) Navigator.pop(context);
+    if (bytes == null || !mounted) return;
     await Printing.sharePdf(
       bytes: bytes,
       filename: '${_isOffer ? "Property" : "Request"}_${_property.id}.pdf',
