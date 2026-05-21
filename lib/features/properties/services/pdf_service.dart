@@ -399,18 +399,16 @@ class PdfService {
     if (paths.isEmpty) return [];
 
     final results = List<Uint8List?>.filled(paths.length, null);
-    int completed = 0;
 
     for (int i = 0; i < paths.length; i++) {
       try {
         final bytes = await File(paths[i]).readAsBytes();
-        results[i] = _processImageBytes(bytes);
+        results[i] = await compute(_processImageBytes, bytes);
       } catch (e) {
         debugPrint('PdfService: failed image $i: $e');
       }
 
-      completed++;
-      onProgress?.call(completed, paths.length);
+      onProgress?.call(i + 1, paths.length);
     }
 
     return results;
