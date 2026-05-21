@@ -1,11 +1,12 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/property_model.dart';
 import '../providers/property_provider.dart';
 import '../services/pdf_service.dart';
 import 'add_property_view.dart';
-import 'package:printing/printing.dart';
 import '../../settings/providers/settings_provider.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
@@ -48,9 +49,14 @@ class _PropertyDetailViewState extends ConsumerState<PropertyDetailView> {
     );
 
     if (bytes == null || !mounted) return;
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: '${_isOffer ? "Property" : "Request"}_${_property.id}.pdf',
+
+    final fileName = '${_isOffer ? "Property" : "Request"}_${_property.id}.pdf';
+    final file = File('${Directory.systemTemp.path}/$fileName');
+    await file.writeAsBytes(bytes);
+
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      subject: _isOffer ? 'تقرير العقار' : 'تقرير الطلب',
     );
   }
 
