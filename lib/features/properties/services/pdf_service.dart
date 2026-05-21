@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -17,11 +18,11 @@ Uint8List? _processImageBytes(Uint8List rawBytes) {
     if (image == null) return null;
 
     img.Image resized = image;
-    if (image.width > 800) {
-      resized = img.copyResize(image, width: 800);
+    if (image.width > 600) {
+      resized = img.copyResize(image, width: 600);
     }
 
-    return Uint8List.fromList(img.encodeJpg(resized, quality: 75));
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 60));
   } catch (_) {
     return null;
   }
@@ -262,30 +263,97 @@ class PdfService {
     void Function(int completed, int total)? onProgress,
   }) async {
     final isOffer = property.entryType == EntryType.offer;
-    final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
-    final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
 
+    // Process images (each in its own isolate via compute → non-blocking)
+    final imageList = <Uint8List>[];
+    if (property.images.isNotEmpty) {
+      final results = await _processImagesConcurrently(
+        property.images,
+        onProgress: onProgress,
+      );
+      for (final r in results) {
+        if (r != null) imageList.add(r);
+      }
+    }
+
+    // Signal building phase
+    onProgress?.call(1, 1);
+    await Future.delayed(Duration.zero);
+
+    // Build PDF in background isolate → main thread stays free (no ANR)
     try {
+      final propMap = property.toMap();
+      final officeName = settings.officeName;
+      final officePhone = settings.officePhone;
+      final fontRegular = (await rootBundle.load('assets/fonts/Cairo-Regular.ttf'))
+          .buffer
+          .asUint8List();
+      final fontBold = (await rootBundle.load('assets/fonts/Cairo-Bold.ttf'))
+          .buffer
+          .asUint8List();
+
+      return await Isolate.run(() {
+        final prop = PropertyModel.fromMap(propMap);
+        final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
+        final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
+        final font = pw.Font.ttf(fontRegular.buffer.asByteData());
+        final boldFont = pw.Font.ttf(fontBold.buffer.asByteData());
+
+        final imgs = imageList.map((b) => pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 20),
+          child: pw.Center(
+            child: pw.Image(
+              pw.MemoryImage(b),
+              fit: pw.BoxFit.contain,
+              width: 400,
+            ),
+          ),
+        )).toList();
+
+        final pdf = pw.Document(
+          title: '${isOffer ? 'Property' : 'Request'}_${prop.id}',
+          author: officeName.isNotEmpty ? officeName : 'Real Estate App',
+          subject: '${prop.propertyType} - ${prop.province}',
+        );
+
+        pdf.addPage(
+          pw.MultiPage(
+            pageFormat: PdfPageFormat.a4,
+            theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+            build: (_) => [
+              _buildPdfContent(
+                imgs, prop, officeName, officePhone,
+                isOffer, boldFont, entryPdfColor, dividerColor,
+              ),
+            ],
+          ),
+        );
+
+        return pdf.save();
+      });
+    } catch (e, stack) {
+      debugPrint('PdfService: _generate isolate failed: $e\n$stack');
+
+      // Fallback: build on main thread (may block briefly)
+      final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
+      final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
+
+      final imageWidgets = imageList.map((b) => pw.Container(
+        margin: const pw.EdgeInsets.only(bottom: 20),
+        child: pw.Center(
+          child: pw.Image(
+            pw.MemoryImage(b),
+            fit: pw.BoxFit.contain,
+            width: 400,
+          ),
+        ),
+      )).toList();
+
       final pdf = pw.Document(
         title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
         author: settings.officeName.isNotEmpty ? settings.officeName : 'Real Estate App',
         subject: '${property.propertyType} - ${property.province}',
       );
-
-      final imageWidgets = <pw.Widget>[];
-      if (property.images.isNotEmpty) {
-        final results = await _processImagesConcurrently(
-          property.images,
-          onProgress: onProgress,
-        );
-        for (final processed in results) {
-          if (processed != null) {
-            imageWidgets.add(_buildImageWidget(processed));
-          }
-        }
-      }
-
-      await Future.delayed(Duration.zero);
 
       pdf.addPage(
         pw.MultiPage(
@@ -293,50 +361,15 @@ class PdfService {
           theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
           build: (_) => [
             _buildPdfContent(
-              imageWidgets,
-              property,
-              settings.officeName,
-              settings.officePhone,
-              isOffer,
-              arabicBoldFont,
-              entryPdfColor,
-              dividerColor,
+              imageWidgets, property, settings.officeName, settings.officePhone,
+              isOffer, arabicBoldFont, entryPdfColor, dividerColor,
             ),
           ],
         ),
       );
 
+      debugPrint('PdfService: fallback PDF generated on main thread');
       return pdf.save();
-    } catch (e, stack) {
-      debugPrint('PdfService: _generate failed with images: $e\n$stack');
-
-      final fallbackPdf = pw.Document(
-        title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
-        author: settings.officeName.isNotEmpty ? settings.officeName : 'Real Estate App',
-        subject: '${property.propertyType} - ${property.province}',
-      );
-
-      fallbackPdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
-          build: (_) => [
-            _buildPdfContent(
-              [],
-              property,
-              settings.officeName,
-              settings.officePhone,
-              isOffer,
-              arabicBoldFont,
-              entryPdfColor,
-              dividerColor,
-            ),
-          ],
-        ),
-      );
-
-      debugPrint('PdfService: trying fallback without images');
-      return fallbackPdf.save();
     }
   }
 
@@ -437,18 +470,5 @@ class PdfService {
     } catch (e) {
       debugPrint('PdfService: failed to clear all cache: $e');
     }
-  }
-
-  static pw.Widget _buildImageWidget(Uint8List processed) {
-    return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 20),
-      child: pw.Center(
-        child: pw.Image(
-          pw.MemoryImage(processed),
-          fit: pw.BoxFit.contain,
-          width: 400,
-        ),
-      ),
-    );
   }
 }
