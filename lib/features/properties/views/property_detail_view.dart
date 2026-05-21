@@ -35,7 +35,7 @@ class _PropertyDetailViewState extends ConsumerState<PropertyDetailView> {
     if (!mounted) return;
     showAppLoadingDialog(context, message: 'جاري إنشاء PDF...');
 
-    final bytes = await PdfService.generatePropertyPdf(
+    final bytes = await PdfService.getCachedPdf(
       property: _property,
       settings: settings,
     );

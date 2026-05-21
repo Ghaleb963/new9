@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -9,10 +11,22 @@ import '../models/property_model.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../settings/providers/settings_provider.dart';
 
-/// Decodes [rawBytes], conditionally resizes (if width > 1000), and
-/// JPEG‑encodes at quality 75.
+bool _isJpeg(Uint8List bytes) {
+  return bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
+}
+
 Uint8List? _processImageBytes(Uint8List rawBytes) {
   try {
+    if (rawBytes.length < 4) return null;
+
+    if (_isJpeg(rawBytes)) {
+      final decoder = img.JpegDecoder();
+      final info = decoder.startDecode(rawBytes);
+      if (info != null && info.width <= 1000) {
+        return rawBytes;
+      }
+    }
+
     final image = img.decodeImage(rawBytes);
     if (image == null) return null;
 
@@ -25,6 +39,10 @@ Uint8List? _processImageBytes(Uint8List rawBytes) {
   } catch (_) {
     return null;
   }
+}
+
+List<Uint8List?> _processAllImages(List<Uint8List> allBytes) {
+  return allBytes.map((b) => _processImageBytes(b)).toList();
 }
 
 String _ar(String text) {
@@ -53,7 +71,9 @@ pw.Widget _row(String title, String value) {
 
 pw.Widget _buildPdfContent(
   List<pw.Widget> imageWidgets,
-  Map<String, dynamic> p,
+  PropertyModel property,
+  String officeName,
+  String officePhone,
   bool isOffer,
   pw.Font arabicBoldFont,
   PdfColor entryPdfColor,
@@ -84,7 +104,7 @@ pw.Widget _buildPdfContent(
         ),
         pw.Divider(color: dividerColor, thickness: 2),
         pw.SizedBox(height: 10),
-        if ((p['officeName'] as String? ?? '').isNotEmpty) ...[
+        if (officeName.isNotEmpty) ...[
           pw.Container(
             padding: const pw.EdgeInsets.all(10),
             decoration: pw.BoxDecoration(
@@ -96,11 +116,11 @@ pw.Widget _buildPdfContent(
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text(_ar(p['officeName'] as String),
+                pw.Text(_ar(officeName),
                     style: pw.TextStyle(
                         font: arabicBoldFont, fontSize: 16)),
-                if ((p['officePhone'] as String? ?? '').isNotEmpty)
-                  pw.Text(_ar('هاتف: ${p['officePhone']}'),
+                if (officePhone.isNotEmpty)
+                  pw.Text(_ar('هاتف: $officePhone'),
                       style: const pw.TextStyle(fontSize: 12)),
               ],
             ),
@@ -114,41 +134,41 @@ pw.Widget _buildPdfContent(
           style: pw.TextStyle(font: arabicBoldFont, fontSize: 18),
         ),
         pw.SizedBox(height: 10),
-        _row('نوع السجل', p['entryType'] as String? ?? ''),
-        _row('نوع العقار', p['propertyType'] as String? ?? ''),
+        _row('نوع السجل', property.entryType.label),
+        _row('نوع العقار', property.propertyType),
         _row(
           isOffer ? 'نوع الإعلان' : 'نوع المطلوب',
-          p['adType'] as String? ?? '',
+          property.adType,
         ),
-        _row('المحافظة', p['province'] as String? ?? ''),
-        if ((p['region'] as String? ?? '').isNotEmpty)
-          _row('المنطقة', p['region'] as String),
-        if ((p['area'] as num?) != null && (p['area'] as num) > 0)
-          _row('المساحة', '${p['area']} م²'),
-        if ((p['rooms'] as num?) != null && (p['rooms'] as num) > 0)
-          _row('عدد الغرف', '${p['rooms']}'),
-        if ((p['price'] as num?) != null && (p['price'] as num) > 0)
+        _row('المحافظة', property.province),
+        if (property.region.isNotEmpty)
+          _row('المنطقة', property.region),
+        if (property.area > 0)
+          _row('المساحة', '${property.area} م²'),
+        if (property.rooms > 0)
+          _row('عدد الغرف', '${property.rooms}'),
+        if (property.price > 0)
           _row(
             isOffer ? 'السعر' : 'الميزانية',
-            '${p['price']} ${p['currency']}',
+            '${property.price} ${property.currency}',
           ),
         if (isOffer) ...[
-          if ((p['finishingLevel'] as String? ?? '').isNotEmpty)
-            _row('الإكساء', p['finishingLevel'] as String),
-          if ((p['floor'] as String? ?? '').isNotEmpty)
-            _row('الطابق', p['floor'] as String),
-          if ((p['facade'] as String? ?? '').isNotEmpty)
-            _row('الواجهة', p['facade'] as String),
-          if ((p['ownershipType'] as String? ?? '').isNotEmpty)
-            _row('الملكية', p['ownershipType'] as String),
-          _row('الحالة', p['status'] as String? ?? ''),
+          if (property.finishingLevel.isNotEmpty)
+            _row('الإكساء', property.finishingLevel),
+          if (property.floor.isNotEmpty)
+            _row('الطابق', property.floor),
+          if (property.facade.isNotEmpty)
+            _row('الواجهة', property.facade),
+          if (property.ownershipType.isNotEmpty)
+            _row('الملكية', property.ownershipType),
+          _row('الحالة', property.status),
         ],
-        if ((p['notes'] as String? ?? '').isNotEmpty) ...[
+        if (property.notes.isNotEmpty) ...[
           pw.SizedBox(height: 15),
           pw.Text(_ar('ملاحظات:'),
               style:
                   pw.TextStyle(font: arabicBoldFont, fontSize: 14)),
-          pw.Text(_ar(p['notes'] as String),
+          pw.Text(_ar(property.notes),
               style: const pw.TextStyle(fontSize: 12)),
         ],
         if (imageWidgets.isNotEmpty) ...[
@@ -164,84 +184,85 @@ pw.Widget _buildPdfContent(
   );
 }
 
-/// ---------------------------------------------------------------------------
-/// Public API
-/// ---------------------------------------------------------------------------
 class PdfService {
-  /// Generates a professional property PDF directly on the main thread.
-  /// No isolates, no computes — just straightforward async/await.
+  static pw.Font? _cachedFont;
+  static pw.Font? _cachedBoldFont;
+  static const int _imageBatchSize = 3;
+
   static Future<Uint8List> generatePropertyPdf({
     required PropertyModel property,
     required SettingsState settings,
   }) async {
-    Uint8List fontRegular;
-    Uint8List fontBold;
-    try {
-      fontRegular = (await rootBundle.load('assets/fonts/Cairo-Regular.ttf'))
-          .buffer
-          .asUint8List();
-      fontBold = (await rootBundle.load('assets/fonts/Cairo-Bold.ttf'))
-          .buffer
-          .asUint8List();
-    } catch (_) {
-      final regularFont = await PdfGoogleFonts.notoSansArabicRegular();
-      final boldFont = await PdfGoogleFonts.notoSansArabicBold();
-      return _generateSync(property, settings, regularFont, boldFont);
+    final (arabicFont, arabicBoldFont) = await _loadFonts();
+    return _generate(property, settings, arabicFont, arabicBoldFont);
+  }
+
+  static Future<(pw.Font, pw.Font)> _loadFonts() async {
+    if (_cachedFont != null && _cachedBoldFont != null) {
+      return (_cachedFont!, _cachedBoldFont!);
     }
 
-    final arabicFont = pw.Font.ttf(fontRegular.buffer.asByteData());
-    final arabicBoldFont = pw.Font.ttf(fontBold.buffer.asByteData());
+    try {
+      final regular = (await rootBundle.load('assets/fonts/Cairo-Regular.ttf'))
+          .buffer
+          .asUint8List();
+      final bold = (await rootBundle.load('assets/fonts/Cairo-Bold.ttf'))
+          .buffer
+          .asUint8List();
+      _cachedFont = pw.Font.ttf(regular.buffer.asByteData());
+      _cachedBoldFont = pw.Font.ttf(bold.buffer.asByteData());
+      return (_cachedFont!, _cachedBoldFont!);
+    } catch (_) {
+      _cachedFont = await PdfGoogleFonts.notoSansArabicRegular();
+      _cachedBoldFont = await PdfGoogleFonts.notoSansArabicBold();
+      return (_cachedFont!, _cachedBoldFont!);
+    }
+  }
 
+  static Future<Uint8List> _generate(
+    PropertyModel property,
+    SettingsState settings,
+    pw.Font arabicFont,
+    pw.Font arabicBoldFont,
+  ) async {
     final isOffer = property.entryType == EntryType.offer;
-    final pdf = pw.Document();
+    final pdf = pw.Document(
+      title: '${isOffer ? 'Property' : 'Request'}_${property.id}',
+      author: settings.officeName.isNotEmpty ? settings.officeName : 'Real Estate App',
+      subject: '${property.propertyType} - ${property.province}',
+    );
 
     final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
     final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
 
-    // Process each image directly on the main thread.
     final imageWidgets = <pw.Widget>[];
-    for (final imagePath in property.images) {
-      try {
-        final bytes = await File(imagePath).readAsBytes();
-        final processed = _processImageBytes(bytes);
-        if (processed != null) {
-          imageWidgets.add(
-            pw.Container(
-              margin: const pw.EdgeInsets.only(bottom: 20),
-              child: pw.Center(
-                child: pw.Image(
-                  pw.MemoryImage(processed),
-                  fit: pw.BoxFit.contain,
-                  width: 450,
+    if (property.images.isNotEmpty) {
+      final allBytes = await Future.wait(
+        property.images.map((path) => File(path).readAsBytes()),
+      );
+
+      for (var i = 0; i < allBytes.length; i += _imageBatchSize) {
+        final end = (i + _imageBatchSize).clamp(0, allBytes.length);
+        final batch = allBytes.sublist(i, end);
+        final batchResults = await compute(_processAllImages, batch);
+        for (final processed in batchResults) {
+          if (processed != null) {
+            imageWidgets.add(
+              pw.Container(
+                margin: const pw.EdgeInsets.only(bottom: 20),
+                child: pw.Center(
+                  child: pw.Image(
+                    pw.MemoryImage(processed),
+                    fit: pw.BoxFit.contain,
+                    width: 450,
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          }
         }
-      } catch (_) {}
+      }
     }
-
-    // Build property data map for the shared content builder.
-    final p = <String, dynamic>{
-      'entryType': property.entryType.label,
-      'adType': property.adType,
-      'deedType': property.deedType,
-      'propertyType': property.propertyType,
-      'province': property.province,
-      'region': property.region,
-      'floor': property.floor,
-      'rooms': property.rooms,
-      'area': property.area,
-      'facade': property.facade,
-      'finishingLevel': property.finishingLevel,
-      'ownershipType': property.ownershipType,
-      'status': property.status,
-      'price': property.price,
-      'currency': property.currency,
-      'notes': property.notes,
-      'officeName': settings.officeName,
-      'officePhone': settings.officePhone,
-    };
 
     pdf.addPage(
       pw.MultiPage(
@@ -249,7 +270,15 @@ class PdfService {
         theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
         build: (_) => [
           _buildPdfContent(
-              imageWidgets, p, isOffer, arabicBoldFont, entryPdfColor, dividerColor),
+            imageWidgets,
+            property,
+            settings.officeName,
+            settings.officePhone,
+            isOffer,
+            arabicBoldFont,
+            entryPdfColor,
+            dividerColor,
+          ),
         ],
       ),
     );
@@ -257,73 +286,76 @@ class PdfService {
     return pdf.save();
   }
 
-  /// Test-only fallback when rootBundle fonts are unavailable.
-  static Future<Uint8List> _generateSync(
-    PropertyModel property,
-    SettingsState settings,
-    pw.Font arabicFont,
-    pw.Font arabicBoldFont,
-  ) async {
-    final isOffer = property.entryType == EntryType.offer;
-    final pdf = pw.Document();
+  // ─── PDF Cache ─────────────────────────────────────────────────────────
 
-    final entryPdfColor = isOffer ? PdfColors.green900 : PdfColors.orange900;
-    final dividerColor = isOffer ? PdfColors.green : PdfColors.orange;
+  static Future<Directory> _getCacheDir() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final dir = Directory('${appDir.path}/pdf_cache');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
 
-    final imageWidgets = <pw.Widget>[];
-    for (final imagePath in property.images) {
-      try {
-        final raw = await File(imagePath).readAsBytes();
-        final processed = _processImageBytes(raw);
-        if (processed != null) {
-          imageWidgets.add(
-            pw.Container(
-              margin: const pw.EdgeInsets.only(bottom: 20),
-              child: pw.Center(
-                child: pw.Image(
-                  pw.MemoryImage(processed),
-                  fit: pw.BoxFit.contain,
-                  width: 450,
-                ),
-              ),
-            ),
-          );
-        }
-      } catch (_) {}
+  static String _cacheFileName(int propertyId) =>
+      'property_$propertyId.pdf';
+
+  /// Returns cached PDF if available, otherwise generates and caches it.
+  static Future<Uint8List> getCachedPdf({
+    required PropertyModel property,
+    required SettingsState settings,
+  }) async {
+    final id = property.id;
+    if (id == null) {
+      return generatePropertyPdf(property: property, settings: settings);
     }
 
-    final p = <String, dynamic>{
-      'entryType': property.entryType.label,
-      'adType': property.adType,
-      'deedType': property.deedType,
-      'propertyType': property.propertyType,
-      'province': property.province,
-      'region': property.region,
-      'floor': property.floor,
-      'rooms': property.rooms,
-      'area': property.area,
-      'facade': property.facade,
-      'finishingLevel': property.finishingLevel,
-      'ownershipType': property.ownershipType,
-      'status': property.status,
-      'price': property.price,
-      'currency': property.currency,
-      'notes': property.notes,
-      'officeName': settings.officeName,
-      'officePhone': settings.officePhone,
-    };
+    final dir = await _getCacheDir();
+    final file = File('${dir.path}/${_cacheFileName(id)}');
 
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicBoldFont),
-        build: (_) => [
-          _buildPdfContent(
-              imageWidgets, p, isOffer, arabicBoldFont, entryPdfColor, dividerColor),
-        ],
-      ),
-    );
+    if (await file.exists()) {
+      try {
+        return await file.readAsBytes();
+      } catch (e) {
+        debugPrint(
+            'PdfService: corrupted cache for property $id, regenerating: $e');
+      }
+    }
 
-    return pdf.save();
+    final bytes =
+        await generatePropertyPdf(property: property, settings: settings);
+
+    try {
+      await file.writeAsBytes(bytes);
+    } catch (e) {
+      debugPrint('PdfService: failed to write cache for property $id: $e');
+    }
+
+    return bytes;
+  }
+
+  /// Deletes cached PDF for a specific property.
+  static Future<void> invalidateCache(int propertyId) async {
+    try {
+      final dir = await _getCacheDir();
+      final file = File('${dir.path}/${_cacheFileName(propertyId)}');
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e) {
+      debugPrint('PdfService: failed to invalidate cache: $e');
+    }
+  }
+
+  /// Deletes all cached PDFs (e.g., when office info changes).
+  static Future<void> invalidateAllCache() async {
+    try {
+      final dir = await _getCacheDir();
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    } catch (e) {
+      debugPrint('PdfService: failed to clear all cache: $e');
+    }
   }
 }

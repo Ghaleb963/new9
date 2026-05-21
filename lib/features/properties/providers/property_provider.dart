@@ -3,6 +3,7 @@ import '../models/property_model.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/constants/app_constants.dart';
 import '../services/matching_service.dart';
+import '../services/pdf_service.dart';
 
 class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
   final Ref ref;
@@ -27,11 +28,13 @@ class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
   }
 
   Future<void> deleteProperty(int id) async {
+    await PdfService.invalidateCache(id);
     await DatabaseHelper.instance.deleteProperty(id);
     state = state.where((p) => p.id != id).toList();
   }
 
   Future<void> updateProperty(PropertyModel property) async {
+    await PdfService.invalidateCache(property.id!);
     await DatabaseHelper.instance.updateProperty(property);
     state = state.map((p) => p.id == property.id ? property : p).toList();
   }
@@ -41,6 +44,7 @@ class PropertyNotifier extends StateNotifier<List<PropertyModel>> {
     if (index == -1) return;
 
     final updated = state[index].copyWith(status: newStatus);
+    await PdfService.invalidateCache(id);
     await DatabaseHelper.instance.updateProperty(updated);
     state = state.map((p) => p.id == id ? updated : p).toList();
   }

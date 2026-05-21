@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../properties/services/pdf_service.dart';
 
 class SettingsState {
   final String officeName;
@@ -72,6 +73,8 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     await prefs.setString('officePhone', phone);
     await prefs.setString('facebookLink', fb);
     await prefs.setString('instagramLink', insta);
+
+    await PdfService.invalidateAllCache();
 
     state = state.copyWith(
       officeName: name,
