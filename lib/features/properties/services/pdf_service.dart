@@ -260,28 +260,32 @@ class PdfService {
 
     final imageWidgets = <pw.Widget>[];
     if (property.images.isNotEmpty) {
-      final allBytes = await Future.wait(
-        property.images.map((path) => File(path).readAsBytes()),
-      );
+      final pendingBatch = <Uint8List>[];
 
-      for (var i = 0; i < allBytes.length; i += batchSize) {
-        final end = (i + batchSize).clamp(0, allBytes.length);
-        final batch = allBytes.sublist(i, end);
-        final batchResults = await compute(_processAllImages, batch);
-        for (final processed in batchResults) {
+      for (final imagePath in property.images) {
+        try {
+          pendingBatch.add(await File(imagePath).readAsBytes());
+        } catch (e) {
+          debugPrint('PdfService: failed to read $imagePath: $e');
+          continue;
+        }
+
+        if (pendingBatch.length >= batchSize) {
+          final results = await compute(_processAllImages, pendingBatch);
+          for (final processed in results) {
+            if (processed != null) {
+              imageWidgets.add(_buildImageWidget(processed));
+            }
+          }
+          pendingBatch.clear();
+        }
+      }
+
+      if (pendingBatch.isNotEmpty) {
+        final results = await compute(_processAllImages, pendingBatch);
+        for (final processed in results) {
           if (processed != null) {
-            imageWidgets.add(
-              pw.Container(
-                margin: const pw.EdgeInsets.only(bottom: 20),
-                child: pw.Center(
-                  child: pw.Image(
-                    pw.MemoryImage(processed),
-                    fit: pw.BoxFit.contain,
-                    width: 450,
-                  ),
-                ),
-              ),
-            );
+            imageWidgets.add(_buildImageWidget(processed));
           }
         }
       }
@@ -380,5 +384,18 @@ class PdfService {
     } catch (e) {
       debugPrint('PdfService: failed to clear all cache: $e');
     }
+  }
+
+  static pw.Widget _buildImageWidget(Uint8List processed) {
+    return pw.Container(
+      margin: const pw.EdgeInsets.only(bottom: 20),
+      child: pw.Center(
+        child: pw.Image(
+          pw.MemoryImage(processed),
+          fit: pw.BoxFit.contain,
+          width: 450,
+        ),
+      ),
+    );
   }
 }
